@@ -1,0 +1,13 @@
+# Planilhas e dados locais (NUNCA SUBIR)
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+dados/
+*_backup_*
+
+# Logs e temporarios
+*.log
+Thumbs.db
+Desktop.ini
+.vscode/

@@ -1,0 +1,10 @@
+@echo off
+cd /d "%~dp0"
+title Automacao Teams via PowerShell
+echo Iniciando o aplicativo de Automacao Teams...
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0App.ps1"
+if %errorlevel% neq 0 (
+    echo.
+    echo Ocorreu um erro ao executar o aplicativo.
+    pause
+)
