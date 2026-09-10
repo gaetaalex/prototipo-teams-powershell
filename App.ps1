@@ -130,9 +130,9 @@ public class TeamsHelper {
         if (GetWindowRect(hwnd, out rect)) {
             int w = rect.Right - rect.Left;
             int h = rect.Bottom - rect.Top;
-            // O campo "Digite uma mensagem" fica centralizado no painel de chat e a ~45px do fundo da janela
-            int targetX = rect.Left + (int)(w * 0.65);
-            int targetY = rect.Bottom - 45;
+            // O campo "Digite uma mensagem" fica no painel de chat e a ~75px do fundo da janela (bem acima da barra de icones)
+            int targetX = (w > 800) ? (rect.Left + 360 + (int)((w - 360) * 0.45)) : (rect.Left + (int)(w * 0.60));
+            int targetY = rect.Bottom - 75;
             SetCursorPos(targetX, targetY);
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
@@ -1290,27 +1290,35 @@ function Executar-Envio($somentePrimeiro = $false) {
                     [System.Windows.Forms.SendKeys]::SendWait("{DOWN}")
                     Start-Sleep -Milliseconds 300
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-                    Start-Sleep -Milliseconds 1500
+                    Start-Sleep -Milliseconds 2000 # Aguarda o Teams carregar o chat com o colaborador
 
-                    # 9. Focar na caixa de mensagem no rodape da janela
+                    # 9. Ir do campo 'Para:' para a caixa de mensagem 'Digite uma mensagem'
+                    # No Teams, ao confirmar o destinatario, pressionar ENTER ou TAB pula direto para a mensagem
+                    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+                    Start-Sleep -Milliseconds 250
+                    [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
+                    Start-Sleep -Milliseconds 250
+
                     # Atalho oficial do Teams para ir direto para a caixa de texto: Ctrl + R
                     [System.Windows.Forms.SendKeys]::SendWait("^r")
-                    Start-Sleep -Milliseconds 300
+                    Start-Sleep -Milliseconds 250
+
+                    # Clique fisico assistido calibrado exatamente dentro da caixa de texto (75px acima do rodape)
                     try {
                         [TeamsHelper]::ClicarNoCampoMensagem()
-                        Start-Sleep -Milliseconds 300
+                        Start-Sleep -Milliseconds 400
                     } catch { }
 
-                    # 10. Limpar qualquer caractere residual e colar a mensagem personalizada atualizada
-                    [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
-                    Start-Sleep -Milliseconds 100
+                    # 10. Copiar e colar a mensagem personalizada atualizada
+                    Log-Msg "  Colando mensagem personalizada..."
                     [System.Windows.Forms.Clipboard]::SetText($c.Mensagem)
-                    Start-Sleep -Milliseconds 150
+                    Start-Sleep -Milliseconds 200
                     [System.Windows.Forms.SendKeys]::SendWait("^v")
                     Start-Sleep -Milliseconds 800
 
                     # 11. DISPARAR O ENVIO DA MENSAGEM NO TEAMS
                     # Enviamos Ctrl+Enter (atalho universal de envio da Microsoft), Enter e clique fisico no botao Enviar
+                    Log-Msg "  Disparando envio (Ctrl+Enter e Botao Enviar)..."
                     [System.Windows.Forms.SendKeys]::SendWait("^{ENTER}")
                     Start-Sleep -Milliseconds 300
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
