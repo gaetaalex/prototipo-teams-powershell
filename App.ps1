@@ -10,6 +10,52 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
+# Helper nativo Win32 para foco e clique confiavel na caixa de mensagem do Teams
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+
+public class TeamsHelper {
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern bool SetCursorPos(int X, int Y);
+
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
+    public const uint MOUSEEVENTF_LEFTUP = 0x04;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    public static void ClicarNoCampoMensagem() {
+        IntPtr hwnd = GetForegroundWindow();
+        RECT rect;
+        if (GetWindowRect(hwnd, out rect)) {
+            int w = rect.Right - rect.Left;
+            int h = rect.Bottom - rect.Top;
+            // O campo "Digite uma mensagem" fica centralizado no painel de chat e a ~45px do fundo da janela
+            int targetX = rect.Left + (int)(w * 0.65);
+            int targetY = rect.Bottom - 45;
+            SetCursorPos(targetX, targetY);
+            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+        }
+    }
+}
+"@
+
 # Estrutura XAML da Interface Principal
 [xml]$xamlPrincipal = @"
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -159,6 +205,7 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
                     <ColumnDefinition Width="105"/>
                     <ColumnDefinition Width="115"/>
                     <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
@@ -173,7 +220,7 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
                 </StackPanel>
 
                 <StackPanel Grid.Column="2" Margin="0,0,8,0">
-                    <Label Content="Formato do Teams (ex: {matricula}@banco.com.br ou apenas {matricula}):"/>
+                    <Label Content="Formato do Teams (ex: {matricula}):"/>
                     <TextBox x:Name="TxtFormatoEmail" ToolTip="Digite o dominio real do Teams da sua empresa ou use apenas {matricula} se o Teams busca direto pela matricula"/>
                 </StackPanel>
 
@@ -187,16 +234,27 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
                     <TextBox x:Name="TxtIntervaloEnvio" Text="3"/>
                 </StackPanel>
 
-                <Button x:Name="BtnRecalcular" Grid.Column="5" Content="Aplicar Regras" Padding="12,3" Margin="4,14,8,0" Background="#4F46E5" Foreground="White" FontWeight="SemiBold" ToolTip="Recalcula a previa na hora com os novos limites"/>
+                <Button x:Name="BtnRecalcular" Grid.Column="5" Content="Aplicar Regras" Padding="12,3" Margin="4,14,4,0" Background="#4F46E5" Foreground="White" FontWeight="SemiBold" ToolTip="Recalcula a previa na hora com os novos limites"/>
 
-                <StackPanel Grid.Column="6" VerticalAlignment="Center" Margin="4,12,0,0">
+                <Button x:Name="BtnSalvarConfig" Grid.Column="6" Padding="10,3" Margin="4,14,8,0" Background="#0284C7" Foreground="White" FontWeight="SemiBold" ToolTip="Salva a planilha, abas, colunas e configuracoes para abrir tudo automaticamente na proxima vez">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <Viewbox Width="14" Height="14" Margin="0,0,6,0">
+                            <Canvas Width="24" Height="24">
+                                <Path Fill="White" Data="M19,21H5C3.89,21 3,20.1 3,19V5C3,3.89 3.89,3 5,3H16L21,8V19C21,20.1 20.1,21 19,21M17,19V11H7V19H17M15,5H5V9H15V5Z"/>
+                            </Canvas>
+                        </Viewbox>
+                        <TextBlock Text="Salvar Config" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+
+                <StackPanel Grid.Column="7" VerticalAlignment="Center" Margin="4,12,0,0">
                     <CheckBox x:Name="ChkConfirmarEnvio" Content="Confirmar antes de gravar no Excel" FontWeight="SemiBold" Foreground="#1E40AF" ToolTip="Pergunta se a mensagem realmente foi enviada no Teams antes de atualizar a planilha"/>
                     <CheckBox x:Name="ChkModoSimulacao" Content="Modo Simulacao (nao envia)" FontWeight="Normal" Foreground="#B45309" Margin="0,2,0,0"/>
                 </StackPanel>
             </Grid>
         </GroupBox>
 
-        <!-- 4. PREVIA DOS DADOS (COM ROLAGEM HORIZONTAL/VERTICAL E SPLITTER) E LOGS -->
+        <!-- 4. PREVIA DOS DADOS (COM ROLAGEM HORIZONTAL/VERTICAL E LOGS) -->
         <Grid Grid.Row="4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="3.2*"/>
@@ -217,19 +275,61 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
                           HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                           ScrollViewer.HorizontalScrollBarVisibility="Auto"
                           ScrollViewer.VerticalScrollBarVisibility="Auto"
-                          ScrollViewer.CanContentScroll="True"
+                          ScrollViewer.CanContentScroll="False"
                           Background="White" RowHeaderWidth="0" FontSize="11">
+                    <DataGrid.Resources>
+                        <Style TargetType="DataGridCell">
+                            <Setter Property="Padding" Value="4,4"/>
+                            <Setter Property="VerticalContentAlignment" Value="Top"/>
+                        </Style>
+                    </DataGrid.Resources>
                     <DataGrid.Columns>
                         <DataGridTextColumn Header="Linha" Binding="{Binding Linha}" Width="45"/>
                         <DataGridTextColumn Header="Matricula" Binding="{Binding Matricula}" Width="85"/>
-                        <DataGridTextColumn Header="Nome" Binding="{Binding Nome}" Width="140"/>
-                        <DataGridTextColumn Header="Destinatario" Binding="{Binding Destinatario}" Width="160"/>
+                        <DataGridTextColumn Header="Nome" Binding="{Binding Nome}" Width="135"/>
+                        <DataGridTextColumn Header="Destinatario" Binding="{Binding Destinatario}" Width="150"/>
                         <DataGridTextColumn Header="Contatos" Binding="{Binding Numero}" Width="65"/>
                         <DataGridTextColumn Header="Msg a Enviar" Binding="{Binding TipoMensagem}" Width="110"/>
                         <DataGridTextColumn Header="Situacao" Binding="{Binding Situacao}" Width="145"/>
                         <DataGridTextColumn Header="Status Atual" Binding="{Binding Status}" Width="110"/>
-                        <DataGridTextColumn Header="Ultima Data" Binding="{Binding UltimaData}" Width="135"/>
-                        <DataGridTextColumn Header="Texto da Mensagem" Binding="{Binding Mensagem}" Width="480"/>
+                        <DataGridTextColumn Header="Ultima Data" Binding="{Binding UltimaData}" Width="130"/>
+                        
+                        <!-- 1a Mensagem completa com quebra de linha (nao corta o texto) -->
+                        <DataGridTextColumn Header="1a Mensagem (Planilha)" Binding="{Binding Mensagem1}" Width="340">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="TextWrapping" Value="Wrap"/>
+                                    <Setter Property="VerticalAlignment" Value="Top"/>
+                                    <Setter Property="Padding" Value="2,2"/>
+                                    <Setter Property="Foreground" Value="#1E293B"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+
+                        <!-- 2a Mensagem completa com quebra de linha (nao corta o texto) -->
+                        <DataGridTextColumn Header="2a Mensagem (Follow-up)" Binding="{Binding Mensagem2}" Width="340">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="TextWrapping" Value="Wrap"/>
+                                    <Setter Property="VerticalAlignment" Value="Top"/>
+                                    <Setter Property="Padding" Value="2,2"/>
+                                    <Setter Property="Foreground" Value="#334155"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+
+                        <!-- Mensagem que sera efetivamente disparada agora -->
+                        <DataGridTextColumn Header="Texto que Sera Enviado" Binding="{Binding Mensagem}" Width="380">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="TextWrapping" Value="Wrap"/>
+                                    <Setter Property="VerticalAlignment" Value="Top"/>
+                                    <Setter Property="Padding" Value="2,2"/>
+                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                    <Setter Property="Foreground" Value="#0F172A"/>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
                     </DataGrid.Columns>
                 </DataGrid>
             </GroupBox>
@@ -366,9 +466,9 @@ $window = [System.Windows.Markup.XamlReader]::Load($readerPrincipal)
 
 # Garantir que a janela nunca abra acima do topo do monitor
 $window.Add_Loaded({
-    if ($window.Top -lt 0) { $window.Top = 0 }
-    if ($window.Left -lt 0) { $window.Left = 0 }
-})
+        if ($window.Top -lt 0) { $window.Top = 0 }
+        if ($window.Left -lt 0) { $window.Left = 0 }
+    })
 
 # Mapear controles da Janela Principal
 $TxtCaminhoPlanilha = $window.FindName("TxtCaminhoPlanilha")
@@ -388,6 +488,7 @@ $CmbColEmail = $window.FindName("CmbColEmail")
 $TxtMaxContatos = $window.FindName("TxtMaxContatos")
 $TxtDiasSegundo = $window.FindName("TxtDiasSegundo")
 $BtnRecalcular = $window.FindName("BtnRecalcular")
+$BtnSalvarConfig = $window.FindName("BtnSalvarConfig")
 $TxtFormatoEmail = $window.FindName("TxtFormatoEmail")
 $TxtFormatoEmail.Text = "{matricula}" # Padrao: busca direto pela matricula ou usuario personaliza
 $TxtEsperaTeams = $window.FindName("TxtEsperaTeams")
@@ -411,6 +512,7 @@ $global:PararSolicitado = $false
 $global:ColunasDetectadas = @()
 $global:ListaContatos = @()
 $global:RelatorioFinal = [System.Collections.ArrayList]::new()
+$global:PastaApp = if ($PSScriptRoot -and (Test-Path (Join-Path $PSScriptRoot "App.ps1"))) { $PSScriptRoot } else { "W:\N8N\SISTEMA BANCO\prototipo_teams_powershell" }
 
 # Funcao auxiliar para registrar logs com data/hora e scroll automatico
 function Log-Msg($msg, $destaque = $false) {
@@ -432,21 +534,21 @@ function Normalizar-Texto($txt) {
 
 # Procurar Planilha via Dialogo nativo
 $BtnProcurar.Add_Click({
-    $dialog = New-Object Microsoft.Win32.OpenFileDialog
-    $dialog.Filter = "Planilhas Excel (*.xlsx; *.xlsm)|*.xlsx;*.xlsm|Todos os Arquivos (*.*)|*.*"
-    $dialog.Title = "Selecione a Planilha de Contatos"
+        $dialog = New-Object Microsoft.Win32.OpenFileDialog
+        $dialog.Filter = "Planilhas Excel (*.xlsx; *.xlsm)|*.xlsx;*.xlsm|Todos os Arquivos (*.*)|*.*"
+        $dialog.Title = "Selecione a Planilha de Contatos"
     
-    $pastaPadrao = "W:\N8N\SISTEMA BANCO\prototipo_teams_manual\dados"
-    if (Test-Path $pastaPadrao) { $dialog.InitialDirectory = $pastaPadrao }
+        $pastaPadrao = "W:\N8N\SISTEMA BANCO\prototipo_teams_manual\dados"
+        if (Test-Path $pastaPadrao) { $dialog.InitialDirectory = $pastaPadrao }
 
-    if ($dialog.ShowDialog() -eq $true) {
-        $TxtCaminhoPlanilha.Text = $dialog.FileName
-        Carregar-Abas-Planilha $dialog.FileName
-    }
-})
+        if ($dialog.ShowDialog() -eq $true) {
+            $TxtCaminhoPlanilha.Text = $dialog.FileName
+            Carregar-Abas-Planilha $dialog.FileName
+        }
+    })
 
 # Ler Abas do arquivo Excel selecionado
-function Carregar-Abas-Planilha($caminho) {
+function Carregar-Abas-Planilha($caminho, $abaPreSelecionada = $null) {
     Log-Msg "Inspecionando abas do arquivo: $(Split-Path $caminho -Leaf)..."
     $CmbAbas.Items.Clear()
 
@@ -460,21 +562,28 @@ function Carregar-Abas-Planilha($caminho) {
         }
         $wb.Close($false)
         if ($CmbAbas.Items.Count -gt 0) {
-            $CmbAbas.SelectedIndex = 0
-            Log-Msg "Abas detectadas: $($CmbAbas.Items.Count). Clique em 'Carregar e Mapear'."
+            if ($abaPreSelecionada -and $CmbAbas.Items.Contains($abaPreSelecionada)) {
+                $CmbAbas.SelectedItem = $abaPreSelecionada
+            }
+            else {
+                $CmbAbas.SelectedIndex = 0
+            }
+            Log-Msg "Abas detectadas: $($CmbAbas.Items.Count)."
         }
-    } catch {
+    }
+    catch {
         Log-Msg "Erro ao ler abas do Excel: $($_.Exception.Message)"
         [System.Windows.MessageBox]::Show("Nao foi possivel ler o arquivo: $($_.Exception.Message)", "Erro no Excel", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
-    } finally {
+    }
+    finally {
         $excel.Quit()
         [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
         [GC]::Collect()
     }
 }
 
-# Preencher ComboBox com as colunas detectadas e auto-mapear
-function Popular-Combo-Colunas($combo, $colunas, $nomesPadrao, $obrigatorio = $true) {
+# Preencher ComboBox com as colunas detectadas e auto-mapear (priorizando configuracao salva)
+function Popular-Combo-Colunas($combo, $colunas, $nomesPadrao, $obrigatorio = $true, $salvo = $null) {
     $combo.Items.Clear()
     if (-not $obrigatorio) {
         $combo.Items.Add("(Nenhum / Desativado)") | Out-Null
@@ -485,9 +594,15 @@ function Popular-Combo-Colunas($combo, $colunas, $nomesPadrao, $obrigatorio = $t
 
     foreach ($col in $colunas) {
         $combo.Items.Add($col.Nome) | Out-Null
-        $colNorm = Normalizar-Texto $col.Nome
 
+        # 1. Se houver valor salvo previamente, tem prioridade absoluta
+        if (-not [string]::IsNullOrWhiteSpace($salvo) -and $col.Nome.Trim().ToLower() -eq $salvo.Trim().ToLower()) {
+            $indiceSelecionado = $index
+        }
+
+        # 2. Caso nao tenha salvo, usa busca por padrao de texto
         if ($indiceSelecionado -eq -1) {
+            $colNorm = Normalizar-Texto $col.Nome
             foreach ($padrao in $nomesPadrao) {
                 $padraoNorm = Normalizar-Texto $padrao
                 if ($colNorm -like "*$padraoNorm*") {
@@ -501,68 +616,14 @@ function Popular-Combo-Colunas($combo, $colunas, $nomesPadrao, $obrigatorio = $t
 
     if ($indiceSelecionado -ge 0) {
         $combo.SelectedIndex = $indiceSelecionado
-    } elseif ($obrigatorio -and $combo.Items.Count -gt 0) {
+    }
+    elseif ($obrigatorio -and $combo.Items.Count -gt 0) {
         $combo.SelectedIndex = 0
-    } elseif (-not $obrigatorio) {
+    }
+    elseif (-not $obrigatorio) {
         $combo.SelectedIndex = 0
     }
 }
-
-# Acao do Botao Carregar Colunas e Mapear
-$BtnCarregarColunas.Add_Click({
-    $caminho = $TxtCaminhoPlanilha.Text
-    $aba = $CmbAbas.Text
-
-    if (-not (Test-Path $caminho)) {
-        [System.Windows.MessageBox]::Show("Por favor, selecione uma planilha valida primeiro.", "Aviso", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
-        return
-    }
-
-    Log-Msg "Lendo cabecalhos da aba '$aba'...", $true
-    $excel = New-Object -ComObject Excel.Application
-    $excel.Visible = $false
-    $excel.DisplayAlerts = $false
-
-    try {
-        $wb = $excel.Workbooks.Open($caminho, $null, $true)
-        $ws = if ($aba) { $wb.Sheets.Item($aba) } else { $wb.Sheets.Item(1) }
-        $totalCols = $ws.UsedRange.Columns.Count
-
-        $global:ColunasDetectadas = @()
-        for ($c = 1; $c -le $totalCols; $c++) {
-            $nomeCol = $ws.Cells.Item(1, $c).Text
-            if (-not [string]::IsNullOrWhiteSpace($nomeCol)) {
-                $global:ColunasDetectadas += [PSCustomObject]@{
-                    Numero = $c
-                    Nome = $nomeCol.Trim()
-                }
-            }
-        }
-
-        $wb.Close($false)
-
-        Log-Msg "Detectadas $($global:ColunasDetectadas.Count) colunas validas no cabecalho."
-
-        # Mapeamento automatico inteligente
-        Popular-Combo-Colunas $CmbColMatricula $global:ColunasDetectadas @("matricula", "id", "chapa") $true
-        Popular-Combo-Colunas $CmbColNome $global:ColunasDetectadas @("usuario", "nome") $true
-        Popular-Combo-Colunas $CmbColMensagem1 $global:ColunasDetectadas @("texto de contato", "mensagem", "contato") $true
-        Popular-Combo-Colunas $CmbColMensagem2 $global:ColunasDetectadas @("texto segundo contato", "segundo contato", "mensagem 2") $false
-        Popular-Combo-Colunas $CmbColStatus $global:ColunasDetectadas @("status envio", "status") $true
-        Popular-Combo-Colunas $CmbColNumero $global:ColunasDetectadas @("numero de contato", "numero contato", "contatos") $true
-        Popular-Combo-Colunas $CmbColUltimaData $global:ColunasDetectadas @("ultima data de contato", "ultima data", "data contato") $true
-        Popular-Combo-Colunas $CmbColEmail $global:ColunasDetectadas @("email_teams", "email", "upn") $false
-
-        Log-Msg "Mapeamento preenchido. Carregando previa dos dados..."
-        Carregar-Previa-Dados
-    } catch {
-        Log-Msg "Erro ao ler colunas: $($_.Exception.Message)"
-    } finally {
-        $excel.Quit()
-        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
-        [GC]::Collect()
-    }
-})
 
 # Funcao para encontrar o numero da coluna a partir do nome selecionado
 function Obter-Indice-Coluna($nomeColuna) {
@@ -570,6 +631,38 @@ function Obter-Indice-Coluna($nomeColuna) {
     $match = $global:ColunasDetectadas | Where-Object { $_.Nome -eq $nomeColuna } | Select-Object -First 1
     if ($match) { return $match.Numero }
     return 0
+}
+
+# Salvar Configuracoes no arquivo config.json
+function Salvar-Configuracoes {
+    $cfgPath = Join-Path $global:PastaApp "config.json"
+    $config = [PSCustomObject]@{
+        CaminhoPlanilha = $TxtCaminhoPlanilha.Text
+        AbaSelecionada  = $CmbAbas.Text
+        ColMatricula    = $CmbColMatricula.Text
+        ColNome         = $CmbColNome.Text
+        ColMensagem1    = $CmbColMensagem1.Text
+        ColMensagem2    = $CmbColMensagem2.Text
+        ColStatus       = $CmbColStatus.Text
+        ColNumero       = $CmbColNumero.Text
+        ColUltimaData   = $CmbColUltimaData.Text
+        ColEmail        = $CmbColEmail.Text
+        MaxContatos     = $TxtMaxContatos.Text
+        DiasSegundo     = $TxtDiasSegundo.Text
+        FormatoEmail    = $TxtFormatoEmail.Text
+        EsperaTeams     = $TxtEsperaTeams.Text
+        IntervaloEnvio  = $TxtIntervaloEnvio.Text
+        ConfirmarEnvio  = [bool]$ChkConfirmarEnvio.IsChecked
+        ModoSimulacao   = [bool]$ChkModoSimulacao.IsChecked
+    }
+    try {
+        $json = $config | ConvertTo-Json -Depth 4
+        [System.IO.File]::WriteAllText($cfgPath, $json, [System.Text.Encoding]::UTF8)
+        Log-Msg "Configuracoes salvas automaticamente em config.json."
+    }
+    catch {
+        Log-Msg "Aviso ao salvar config.json: $($_.Exception.Message)"
+    }
 }
 
 # Carregar Dados e Atualizar Tabela de Previa
@@ -602,6 +695,10 @@ function Carregar-Previa-Dados {
 
     try {
         $wb = $excel.Workbooks.Open($caminho, $null, $true)
+        $excel.Calculation = -4105 # xlCalculationAutomatic
+        try { $wb.ForceFullCalculation = $true } catch {}
+        $excel.Calculate()
+        $excel.CalculateFull()
         $ws = if ($aba) { $wb.Sheets.Item($aba) } else { $wb.Sheets.Item(1) }
         $totalLinhas = $ws.UsedRange.Rows.Count
 
@@ -617,8 +714,15 @@ function Carregar-Previa-Dados {
                 $email = $formatoEmail.Replace("{matricula}", $matricula).Replace("{nome}", $nome)
             }
 
-            $msg1 = if ($colMsg1 -gt 0) { $ws.Cells.Item($linha, $colMsg1).Text.Trim() } else { "" }
-            $msg2 = if ($colMsg2 -gt 0) { $ws.Cells.Item($linha, $colMsg2).Text.Trim() } else { "" }
+            $celMsg1 = if ($colMsg1 -gt 0) { $ws.Cells.Item($linha, $colMsg1) } else { $null }
+            $msg1 = if ($celMsg1) {
+                if ($celMsg1.Value2) { [string]$celMsg1.Value2.ToString().Trim() } else { [string]$celMsg1.Text.Trim() }
+            } else { "" }
+
+            $celMsg2 = if ($colMsg2 -gt 0) { $ws.Cells.Item($linha, $colMsg2) } else { $null }
+            $msg2 = if ($celMsg2) {
+                if ($celMsg2.Value2) { [string]$celMsg2.Value2.ToString().Trim() } else { [string]$celMsg2.Text.Trim() }
+            } else { "" }
 
             $status = if ($colStatus -gt 0) { $ws.Cells.Item($linha, $colStatus).Text.Trim() } else { "" }
             $numTxt = if ($colNum -gt 0) { $ws.Cells.Item($linha, $colNum).Text.Trim() } else { "0" }
@@ -635,12 +739,15 @@ function Carregar-Previa-Dados {
 
             if (-not [string]::IsNullOrWhiteSpace($status)) {
                 $situacao = "[Bloqueado] Status: $status"
-            } elseif ($num -ge $maxContatos) {
+            }
+            elseif ($num -ge $maxContatos) {
                 $situacao = "[Bloqueado] Max. atingido ($num/$maxContatos)"
-            } elseif ($num -eq 0) {
+            }
+            elseif ($num -eq 0) {
                 $apto = $true
                 $situacao = "[Apto] 1o Contato"
-            } else {
+            }
+            else {
                 # Segundo contato: verificar se passaram os dias
                 $dataAnt = [datetime]::MinValue
                 if ([datetime]::TryParse($dataTxt, [ref]$dataAnt)) {
@@ -648,26 +755,30 @@ function Carregar-Previa-Dados {
                     if ((Get-Date) -ge $proxima) {
                         $apto = $true
                         $situacao = "[Apto] 2a Msg liberada"
-                    } else {
+                    }
+                    else {
                         $situacao = "[Aguardar] ate " + $proxima.ToString("dd/MM/yyyy")
                     }
-                } else {
+                }
+                else {
                     $situacao = "[Aviso] Data anterior invalida"
                 }
             }
 
             $item = [PSCustomObject]@{
-                Linha = $linha
-                Matricula = $matricula
-                Nome = $nome
+                Linha        = $linha
+                Matricula    = $matricula
+                Nome         = $nome
                 Destinatario = $email
-                Numero = $num
+                Numero       = $num
                 TipoMensagem = $tipoMsg
-                Situacao = $situacao
-                Status = $status
-                UltimaData = $dataTxt
-                Mensagem = $mensagemFinal
-                Apto = $apto
+                Situacao     = $situacao
+                Status       = $status
+                UltimaData   = $dataTxt
+                Mensagem1    = $msg1
+                Mensagem2    = $msg2
+                Mensagem     = $mensagemFinal
+                Apto         = $apto
             }
             $global:ListaContatos.Add($item) | Out-Null
         }
@@ -679,20 +790,119 @@ function Carregar-Previa-Dados {
         $TxtContadores.Text = " Total: $($global:ListaContatos.Count) registros | Aptos para Disparo: $aptos (Limite max: $maxContatos | Espera 2a msg: $diasSegundo d)"
         $TxtStatusGeral.Text = "Previa atualizada: $aptos contato(s) apto(s) para disparo."
         Log-Msg "Regras aplicadas: Max Contatos=$maxContatos, Espera 2a Msg=$diasSegundo dias. Aptos para envio: $aptos."
-    } catch {
+    }
+    catch {
         Log-Msg "Erro ao montar previa: $($_.Exception.Message)"
-    } finally {
+    }
+    finally {
         $excel.Quit()
         [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
         [GC]::Collect()
     }
 }
 
-# Botao de Aplicar Regras / Recalcular Previa
-$BtnRecalcular.Add_Click({
-    Log-Msg "Recalculando previa com novas regras de limite e 2a mensagem..."
-    Carregar-Previa-Dados
-})
+# Funcao para Carregar e Mapear Colunas da Aba selecionada
+function Carregar-Colunas-Mapeamento($salvos = $null) {
+    $caminho = $TxtCaminhoPlanilha.Text
+    $aba = $CmbAbas.Text
+
+    if (-not (Test-Path $caminho)) {
+        Log-Msg "Planilha nao encontrada ou invalida: $caminho"
+        return
+    }
+
+    Log-Msg "Lendo cabecalhos da aba '$aba'...", $true
+    $excel = New-Object -ComObject Excel.Application
+    $excel.Visible = $false
+    $excel.DisplayAlerts = $false
+
+    try {
+        $wb = $excel.Workbooks.Open($caminho, $null, $true)
+        $ws = if ($aba) { $wb.Sheets.Item($aba) } else { $wb.Sheets.Item(1) }
+        $totalCols = $ws.UsedRange.Columns.Count
+
+        $global:ColunasDetectadas = @()
+        for ($c = 1; $c -le $totalCols; $c++) {
+            $nomeCol = $ws.Cells.Item(1, $c).Text
+            if (-not [string]::IsNullOrWhiteSpace($nomeCol)) {
+                $global:ColunasDetectadas += [PSCustomObject]@{
+                    Numero = $c
+                    Nome   = $nomeCol.Trim()
+                }
+            }
+        }
+
+        $wb.Close($false)
+
+        Log-Msg "Detectadas $($global:ColunasDetectadas.Count) colunas validas no cabecalho."
+
+        # Extrair valores salvos se disponiveis
+        $valSalvoMat = if ($salvos) { $salvos.ColMatricula } else { $null }
+        $valSalvoNome = if ($salvos) { $salvos.ColNome } else { $null }
+        $valSalvoMsg1 = if ($salvos) { $salvos.ColMensagem1 } else { $null }
+        $valSalvoMsg2 = if ($salvos) { $salvos.ColMensagem2 } else { $null }
+        $valSalvoStatus = if ($salvos) { $salvos.ColStatus } else { $null }
+        $valSalvoNum = if ($salvos) { $salvos.ColNumero } else { $null }
+        $valSalvoData = if ($salvos) { $salvos.ColUltimaData } else { $null }
+        $valSalvoEmail = if ($salvos) { $salvos.ColEmail } else { $null }
+
+        Popular-Combo-Colunas $CmbColMatricula $global:ColunasDetectadas @("matricula", "id", "chapa") $true $valSalvoMat
+        Popular-Combo-Colunas $CmbColNome $global:ColunasDetectadas @("usuario", "nome") $true $valSalvoNome
+        Popular-Combo-Colunas $CmbColMensagem1 $global:ColunasDetectadas @("texto de contato", "mensagem", "contato") $true $valSalvoMsg1
+        Popular-Combo-Colunas $CmbColMensagem2 $global:ColunasDetectadas @("texto segundo contato", "segundo contato", "mensagem 2") $false $valSalvoMsg2
+        Popular-Combo-Colunas $CmbColStatus $global:ColunasDetectadas @("status envio", "status") $true $valSalvoStatus
+        Popular-Combo-Colunas $CmbColNumero $global:ColunasDetectadas @("numero de contato", "numero contato", "contatos") $true $valSalvoNum
+        Popular-Combo-Colunas $CmbColUltimaData $global:ColunasDetectadas @("ultima data de contato", "ultima data", "data contato") $true $valSalvoData
+        Popular-Combo-Colunas $CmbColEmail $global:ColunasDetectadas @("email_teams", "email", "upn", "matricula") $false $valSalvoEmail
+
+        Log-Msg "Mapeamento preenchido. Carregando previa dos dados..."
+        Carregar-Previa-Dados
+        Salvar-Configuracoes
+    }
+    catch {
+        Log-Msg "Erro ao ler colunas: $($_.Exception.Message)"
+    }
+    finally {
+        $excel.Quit()
+        [System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel) | Out-Null
+        [GC]::Collect()
+    }
+}
+
+# Carregar Configuracoes Salvas no Inicio
+function Carregar-Configuracoes {
+    $cfgPath = Join-Path $global:PastaApp "config.json"
+    if (-not (Test-Path $cfgPath)) {
+        Log-Msg "Nenhum config.json anterior encontrado. Pronto para nova configuracao."
+        return
+    }
+
+    try {
+        $json = [System.IO.File]::ReadAllText($cfgPath, [System.Text.Encoding]::UTF8)
+        $cfg = $json | ConvertFrom-Json
+        if (-not $cfg) { return }
+
+        Log-Msg "Carregando configuracoes salvas do config.json...", $true
+
+        if ($cfg.MaxContatos) { $TxtMaxContatos.Text = $cfg.MaxContatos }
+        if ($cfg.DiasSegundo) { $TxtDiasSegundo.Text = $cfg.DiasSegundo }
+        if ($cfg.FormatoEmail) { $TxtFormatoEmail.Text = $cfg.FormatoEmail }
+        if ($cfg.EsperaTeams) { $TxtEsperaTeams.Text = $cfg.EsperaTeams }
+        if ($cfg.IntervaloEnvio) { $TxtIntervaloEnvio.Text = $cfg.IntervaloEnvio }
+        if ($null -ne $cfg.ConfirmarEnvio) { $ChkConfirmarEnvio.IsChecked = [bool]$cfg.ConfirmarEnvio }
+        if ($null -ne $cfg.ModoSimulacao) { $ChkModoSimulacao.IsChecked = [bool]$cfg.ModoSimulacao }
+
+        if (-not [string]::IsNullOrWhiteSpace($cfg.CaminhoPlanilha) -and (Test-Path $cfg.CaminhoPlanilha)) {
+            $TxtCaminhoPlanilha.Text = $cfg.CaminhoPlanilha
+            Carregar-Abas-Planilha $cfg.CaminhoPlanilha $cfg.AbaSelecionada
+            Carregar-Colunas-Mapeamento $cfg
+            Log-Msg "Configuracoes salvas restauradas com sucesso!"
+        }
+    }
+    catch {
+        Log-Msg "Aviso ao carregar config.json: $($_.Exception.Message)"
+    }
+}
 
 # Funcao para Exibir a Janela Modal de Resumo dos Envios
 function Exibir-Janela-Resumo {
@@ -714,8 +924,8 @@ function Exibir-Janela-Resumo {
     $TxtInfoResumo = $modal.FindName("TxtInfoResumo")
 
     $total = $global:RelatorioFinal.Count
-    $sucessos = ($global:RelatorioFinal | Where-Object { $_.Resultado -eq "Sucesso" }).Count
-    $erros = $total - $sucessos
+    $sucessos = @($global:RelatorioFinal | Where-Object { $_.Resultado -eq "Sucesso" }).Count
+    $erros = @($global:RelatorioFinal | Where-Object { $_.Resultado -ne "Sucesso" }).Count
 
     $TxtResumoTotal.Text = "$total"
     $TxtResumoSucessos.Text = "$sucessos"
@@ -732,7 +942,8 @@ function Exibir-Janela-Resumo {
             try {
                 $global:RelatorioFinal | Export-Csv -Path $sfd.FileName -NoTypeInformation -Encoding UTF8 -Delimiter ";"
                 [System.Windows.MessageBox]::Show("Relatorio exportado com sucesso para:`n$($sfd.FileName)", "Sucesso", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
-            } catch {
+            }
+            catch {
                 [System.Windows.MessageBox]::Show("Erro ao exportar CSV: $($_.Exception.Message)", "Erro", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Error)
             }
         }
@@ -744,11 +955,6 @@ function Exibir-Janela-Resumo {
 
     $modal.ShowDialog() | Out-Null
 }
-
-# Botao na barra principal para reabrir o ultimo resumo
-$BtnVerUltimoResumo.Add_Click({
-    Exibir-Janela-Resumo
-})
 
 # Processo de Envio (Individual ou em Massa)
 function Executar-Envio($somentePrimeiro = $false) {
@@ -775,12 +981,14 @@ function Executar-Envio($somentePrimeiro = $false) {
 
     $caminho = $TxtCaminhoPlanilha.Text
     $aba = $CmbAbas.Text
+    $colMsg1 = Obter-Indice-Coluna $CmbColMensagem1.Text
+    $colMsg2 = Obter-Indice-Coluna $CmbColMensagem2.Text
     $colNum = Obter-Indice-Coluna $CmbColNumero.Text
     $colData = Obter-Indice-Coluna $CmbColUltimaData.Text
     $esperaTeams = [int]$TxtEsperaTeams.Text
     $intervalo = [int]$TxtIntervaloEnvio.Text
-    $simulacao = $ChkModoSimulacao.IsChecked
-    $pedirConfirmacao = $ChkConfirmarEnvio.IsChecked
+    $simulacao = [bool]$ChkModoSimulacao.IsChecked
+    $pedirConfirmacao = [bool]$ChkConfirmarEnvio.IsChecked
 
     $aptos = @($global:ListaContatos | Where-Object { $_.Apto })
     if ($aptos.Count -eq 0) {
@@ -791,7 +999,8 @@ function Executar-Envio($somentePrimeiro = $false) {
     if ($somentePrimeiro) {
         $aptos = @($aptos[0])
         Log-Msg "Modo Teste: Enviando apenas para o primeiro contato ($($aptos[0].Matricula))...", $true
-    } else {
+    }
+    else {
         $resp = [System.Windows.MessageBox]::Show("Confirmar inicio do disparo automatico para $($aptos.Count) contatos aptos?", "Confirmacao de Envio", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)
         if ($resp -ne [System.Windows.MessageBoxResult]::Yes) { return }
         Log-Msg "Iniciando disparo em massa para $($aptos.Count) contatos...", $true
@@ -822,18 +1031,22 @@ function Executar-Envio($somentePrimeiro = $false) {
     $wb = $null
     $ws = $null
 
-    if (-not $simulacao) {
-        $excel = New-Object -ComObject Excel.Application
-        $excel.Visible = $false
-        $excel.DisplayAlerts = $false
-        $wb = $excel.Workbooks.Open($caminho)
-        $ws = if ($aba) { $wb.Sheets.Item($aba) } else { $wb.Sheets.Item(1) }
-    }
-
     $enviados = 0
     $falhas = 0
 
     try {
+        if (-not $simulacao) {
+            $excel = New-Object -ComObject Excel.Application
+            $excel.Visible = $false
+            $excel.DisplayAlerts = $false
+            $wb = $excel.Workbooks.Open($caminho)
+            $excel.Calculation = -4105 # xlCalculationAutomatic
+            try { $wb.ForceFullCalculation = $true } catch {}
+            $excel.Calculate()
+            $excel.CalculateFull()
+            $ws = if ($aba) { $wb.Sheets.Item($aba) } else { $wb.Sheets.Item(1) }
+        }
+
         for ($i = 0; $i -lt $aptos.Count; $i++) {
             $c = $aptos[$i]
 
@@ -842,13 +1055,13 @@ function Executar-Envio($somentePrimeiro = $false) {
                 for ($j = $i; $j -lt $aptos.Count; $j++) {
                     $itemPendente = $aptos[$j]
                     $global:RelatorioFinal.Add([PSCustomObject]@{
-                        Linha = $itemPendente.Linha
-                        Matricula = $itemPendente.Matricula
-                        Nome = $itemPendente.Nome
+                        Linha        = $itemPendente.Linha
+                        Matricula    = $itemPendente.Matricula
+                        Nome         = $itemPendente.Nome
                         Destinatario = $itemPendente.Destinatario
-                        Tipo = $itemPendente.TipoMensagem
-                        Resultado = "Nao Enviado"
-                        Motivo = "Interrompido pelo operador antes do envio (Excel nao alterado)"
+                        Tipo         = $itemPendente.TipoMensagem
+                        Resultado    = "Nao Enviado"
+                        Motivo       = "Interrompido pelo operador antes do envio (Excel nao alterado)"
                     }) | Out-Null
                     $falhas++
                 }
@@ -864,17 +1077,41 @@ function Executar-Envio($somentePrimeiro = $false) {
                 Log-Msg "  [FALHA] $erroMsg - Excel NAO alterado."
                 $c.Situacao = "[Falha] $erroMsg"
                 $global:RelatorioFinal.Add([PSCustomObject]@{
-                    Linha = $c.Linha
-                    Matricula = $c.Matricula
-                    Nome = $c.Nome
+                    Linha        = $c.Linha
+                    Matricula    = $c.Matricula
+                    Nome         = $c.Nome
                     Destinatario = $c.Destinatario
-                    Tipo = $c.TipoMensagem
-                    Resultado = "Erro"
-                    Motivo = "$erroMsg (Excel preservado)"
+                    Tipo         = $c.TipoMensagem
+                    Resultado    = "Erro"
+                    Motivo       = "$erroMsg (Excel preservado)"
                 }) | Out-Null
                 $falhas++
                 $BarraProgresso.Value = $i + 1
                 continue
+            }
+
+            # Recalcular e puxar o texto da mensagem mais recente direto da celula do Excel
+            if (-not $simulacao -and $ws) {
+                $excel.Calculate()
+                $celMsg1Atual = if ($colMsg1 -gt 0) { $ws.Cells.Item($c.Linha, $colMsg1) } else { $null }
+                if ($celMsg1Atual) {
+                    $txtMsg1 = if ($celMsg1Atual.Value2) { [string]$celMsg1Atual.Value2.ToString().Trim() } else { [string]$celMsg1Atual.Text.Trim() }
+                    if (-not [string]::IsNullOrWhiteSpace($txtMsg1)) { $c.Mensagem1 = $txtMsg1 }
+                }
+
+                $celMsg2Atual = if ($colMsg2 -gt 0) { $ws.Cells.Item($c.Linha, $colMsg2) } else { $null }
+                if ($celMsg2Atual) {
+                    $txtMsg2 = if ($celMsg2Atual.Value2) { [string]$celMsg2Atual.Value2.ToString().Trim() } else { [string]$celMsg2Atual.Text.Trim() }
+                    if (-not [string]::IsNullOrWhiteSpace($txtMsg2)) { $c.Mensagem2 = $txtMsg2 }
+                }
+
+                $celulaMsgAtual = if ($c.Numero -eq 0) { $celMsg1Atual } else { if ($celMsg2Atual) { $celMsg2Atual } else { $celMsg1Atual } }
+                if ($celulaMsgAtual) {
+                    $txtAtual = if ($celulaMsgAtual.Value2) { [string]$celulaMsgAtual.Value2.ToString().Trim() } else { [string]$celulaMsgAtual.Text.Trim() }
+                    if (-not [string]::IsNullOrWhiteSpace($txtAtual)) {
+                        $c.Mensagem = $txtAtual
+                    }
+                }
             }
 
             if ([string]::IsNullOrWhiteSpace($c.Mensagem)) {
@@ -882,13 +1119,13 @@ function Executar-Envio($somentePrimeiro = $false) {
                 Log-Msg "  [FALHA] $erroMsg - Excel NAO alterado."
                 $c.Situacao = "[Falha] $erroMsg"
                 $global:RelatorioFinal.Add([PSCustomObject]@{
-                    Linha = $c.Linha
-                    Matricula = $c.Matricula
-                    Nome = $c.Nome
+                    Linha        = $c.Linha
+                    Matricula    = $c.Matricula
+                    Nome         = $c.Nome
                     Destinatario = $c.Destinatario
-                    Tipo = $c.TipoMensagem
-                    Resultado = "Erro"
-                    Motivo = "$erroMsg (Excel preservado)"
+                    Tipo         = $c.TipoMensagem
+                    Resultado    = "Erro"
+                    Motivo       = "$erroMsg (Excel preservado)"
                 }) | Out-Null
                 $falhas++
                 $BarraProgresso.Value = $i + 1
@@ -901,115 +1138,159 @@ function Executar-Envio($somentePrimeiro = $false) {
                     Log-Msg "  [SIMULACAO] Testando envio sem disparar mensagem real..."
                     Start-Sleep -Seconds 1
                     $sucessoItem = $true
-                } else {
-                    # 1. Copiar texto da mensagem para o Clipboard
-                    [System.Windows.Forms.Clipboard]::SetText($c.Mensagem)
-
-                    # 2. Abrir o Teams nativo com users E message no protocolo deep-link
-                    $encodedDest = [System.Uri]::EscapeDataString($c.Destinatario)
-                    $encodedMsg = [System.Uri]::EscapeDataString($c.Mensagem)
-                    $teamsUri = "msteams:/l/chat/0/0?users=${encodedDest}&message=${encodedMsg}"
-                    Start-Process $teamsUri
-                    
-                    # 3. Aguardar Teams carregar o chat
+                }
+                else {
+                    # 1. Abrir ou focar o Teams nativo
+                    Start-Process "msteams:/l/chat/0/0"
                     Start-Sleep -Seconds $esperaTeams
 
-                    # 4. Trazer Teams para foco
+                    # 2. Trazer Teams para foco absoluto
                     try {
+                        $wshell = New-Object -ComObject WScript.Shell
+                        $wshell.AppActivate("Teams") | Out-Null
+                        $wshell.AppActivate("Microsoft Teams") | Out-Null
                         [Microsoft.VisualBasic.Interaction]::AppActivate("Teams")
                         Start-Sleep -Milliseconds 400
+                    }
+                    catch { }
+
+                    # 3. Iniciar nova conversa limpa (Ctrl+N no Teams)
+                    # Garante que o cursor vá direto para o campo 'Para:'
+                    [System.Windows.Forms.SendKeys]::SendWait("^n")
+                    Start-Sleep -Milliseconds 800
+
+                    # 4. Digitar o destinatario (Alex Gaeta, matricula ou email) no campo 'Para:'
+                    [System.Windows.Forms.Clipboard]::SetText($c.Destinatario)
+                    [System.Windows.Forms.SendKeys]::SendWait("^a")
+                    Start-Sleep -Milliseconds 100
+                    [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
+                    Start-Sleep -Milliseconds 100
+                    [System.Windows.Forms.SendKeys]::SendWait("^v")
+                    Log-Msg "  Digitando destinatario '$($c.Destinatario)' no campo Para..."
+
+                    # 5. Aguardar o Teams buscar e sugerir o contato no dropdown
+                    Start-Sleep -Milliseconds 1800
+
+                    # 6. Selecionar o PRIMEIRO contato sugerido na lista
+                    # No Teams, o primeiro resultado da busca ja vem destacado por padrao.
+                    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+                    Start-Sleep -Milliseconds 800
+
+                    # 7. Garantir foco no campo "Digite uma mensagem" (sem selecionar anexos ou historico)
+                    # A) Fechar qualquer menu/popup residual com ESC
+                    [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+                    Start-Sleep -Milliseconds 200
+
+                    # B) Atalho oficial da Microsoft Teams para caixa de mensagem: Alt + Shift + C
+                    [System.Windows.Forms.SendKeys]::SendWait("%+c")
+                    Start-Sleep -Milliseconds 300
+
+                    # C) Clique fisico automatizado no campo "Digite uma mensagem" no rodape da janela
+                    try {
+                        [TeamsHelper]::ClicarNoCampoMensagem()
+                        Start-Sleep -Milliseconds 300
                     } catch { }
 
-                    # Sequencia de Navegacao no Teams:
-                    # 1o: Enter para confirmar o destinatario sugerido no campo Para
-                    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-                    Start-Sleep -Milliseconds 500
+                    # 8. Limpar qualquer rascunho anterior que estivesse no campo de mensagem
+                    [System.Windows.Forms.SendKeys]::SendWait("^a")
+                    Start-Sleep -Milliseconds 100
+                    [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
+                    Start-Sleep -Milliseconds 200
 
-                    # 2o: Tab para pular do campo Para direto para o campo "Digite uma mensagem"
-                    [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
-                    Start-Sleep -Milliseconds 500
-
-                    # 3o: Colar a mensagem no campo de digitacao caso o deep-link nao tenha preenchido
+                    # 9. Copiar e colar a mensagem personalizada atualizada
+                    [System.Windows.Forms.Clipboard]::SetText($c.Mensagem)
+                    Start-Sleep -Milliseconds 100
                     [System.Windows.Forms.SendKeys]::SendWait("^v")
                     Start-Sleep -Milliseconds 600
 
-                    # 4o: Enviar a mensagem com ENTER
+                    # 10. Enviar a mensagem com ENTER
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-                    Start-Sleep -Milliseconds 600
+                    Start-Sleep -Milliseconds 800
 
-                    # 5. Se o modo de confirmacao estiver ativo OU for o teste individual:
-                    if ($somentePrimeiro -or $pedirConfirmacao) {
+                    # Validacao com operador SOMENTE se a opcao estiver explicitamente marcada na tela
+                    if ($pedirConfirmacao) {
                         $respostaOperador = [System.Windows.MessageBox]::Show(
-                            "O Teams abriu a conversa e a mensagem foi enviada com sucesso para $($c.Nome) ($($c.Destinatario))?`n`n" +
-                            "Clique em 'SIM' se enviou corretamente (para atualizar o Excel).`n" +
-                            "Clique em 'NAO' se ocorreu algum erro ou o usuario nao foi encontrado (o Excel NAO sera alterado).",
+                            "A mensagem foi enviada para $($c.Nome) ($($c.Destinatario))?`n`n" +
+                            "Clique em 'SIM' para confirmar a gravacao no Excel.`n" +
+                            "Clique em 'NAO' para cancelar a gravacao deste contato.",
                             "Validacao de Envio",
                             [System.Windows.MessageBoxButton]::YesNo,
                             [System.Windows.MessageBoxImage]::Question
                         )
                         if ($respostaOperador -eq [System.Windows.MessageBoxResult]::Yes) {
                             $sucessoItem = $true
-                        } else {
-                            $sucessoItem = $false
-                            Log-Msg "  [AVISO] Envio nao confirmado pelo operador. Planilha NAO foi alterada."
                         }
-                    } else {
-                        # Modo 100% automatico
+                        else {
+                            $sucessoItem = $false
+                            Log-Msg "  [AVISO] Envio cancelado pelo operador na confirmacao."
+                        }
+                    }
+                    else {
+                        # Modo 100% automatico sem interrupcao de popup
                         $sucessoItem = $true
                     }
 
-                    # 6. ATUALIZAR EXCEL SOMENTE SE HOUVE SUCESSO CONFIRMADO!
+                    # ATUALIZAR EXCEL SOMENTE SE HOUVE SUCESSO CONFIRMADO!
                     if ($sucessoItem) {
-                        if ($colNum -gt 0) {
-                            $ws.Cells.Item($c.Linha, $colNum).Value = $c.Numero + 1
+                        try {
+                            if ($colNum -gt 0) {
+                                $celNum = $ws.Cells.Item([int]$c.Linha, [int]$colNum)
+                                $celNum.Value2 = [int]$c.Numero + 1
+                            }
+                            if ($colData -gt 0) {
+                                $celData = $ws.Cells.Item([int]$c.Linha, [int]$colData)
+                                $celData.Value2 = (Get-Date).ToString("dd/MM/yyyy HH:mm")
+                            }
+                            $wb.Save()
+                            Log-Msg "  -> Mensagem enviada e gravada no Excel com sucesso!"
                         }
-                        if ($colData -gt 0) {
-                            $ws.Cells.Item($c.Linha, $colData).Value = (Get-Date).ToString("dd/MM/yyyy HH:mm")
+                        catch {
+                            Log-Msg "  -> Mensagem enviada no Teams, mas houve aviso ao salvar no Excel: $($_.Exception.Message)"
                         }
-                        $wb.Save()
 
                         $c.Situacao = "[Sucesso] Enviado"
                         $c.Apto = $false
                         $enviados++
-                        Log-Msg "  -> Mensagem enviada e gravada no Excel com sucesso!"
 
                         $global:RelatorioFinal.Add([PSCustomObject]@{
-                            Linha = $c.Linha
-                            Matricula = $c.Matricula
-                            Nome = $c.Nome
+                            Linha        = $c.Linha
+                            Matricula    = $c.Matricula
+                            Nome         = $c.Nome
                             Destinatario = $c.Destinatario
-                            Tipo = $c.TipoMensagem
-                            Resultado = "Sucesso"
-                            Motivo = "Enviado no Teams e confirmado no Excel"
+                            Tipo         = $c.TipoMensagem
+                            Resultado    = "Sucesso"
+                            Motivo       = "Enviado com sucesso no Teams e confirmado no Excel"
                         }) | Out-Null
-                    } else {
+                    }
+                    else {
                         $falhas++
                         $c.Situacao = "[Falha] Nao confirmado / Erro no Teams"
                         $global:RelatorioFinal.Add([PSCustomObject]@{
-                            Linha = $c.Linha
-                            Matricula = $c.Matricula
-                            Nome = $c.Nome
+                            Linha        = $c.Linha
+                            Matricula    = $c.Matricula
+                            Nome         = $c.Nome
                             Destinatario = $c.Destinatario
-                            Tipo = $c.TipoMensagem
-                            Resultado = "Erro"
-                            Motivo = "Envio nao confirmado no Teams (Excel NAO alterado)"
+                            Tipo         = $c.TipoMensagem
+                            Resultado    = "Erro"
+                            Motivo       = "Envio nao confirmado no Teams (Excel NAO alterado)"
                         }) | Out-Null
                     }
                 }
-            } catch {
+            }
+            catch {
                 $erroEx = "Falha durante o envio: $($_.Exception.Message)"
                 Log-Msg "  [ERRO] $erroEx (Excel NAO alterado)"
                 $c.Situacao = "[Falha] $($_.Exception.Message)"
                 $falhas++
 
                 $global:RelatorioFinal.Add([PSCustomObject]@{
-                    Linha = $c.Linha
-                    Matricula = $c.Matricula
-                    Nome = $c.Nome
+                    Linha        = $c.Linha
+                    Matricula    = $c.Matricula
+                    Nome         = $c.Nome
                     Destinatario = $c.Destinatario
-                    Tipo = $c.TipoMensagem
-                    Resultado = "Erro"
-                    Motivo = "$erroEx (Excel preservado)"
+                    Tipo         = $c.TipoMensagem
+                    Resultado    = "Erro"
+                    Motivo       = "$erroEx (Excel preservado)"
                 }) | Out-Null
             }
 
@@ -1021,9 +1302,11 @@ function Executar-Envio($somentePrimeiro = $false) {
                 Start-Sleep -Seconds $intervalo
             }
         }
-    } catch {
+    }
+    catch {
         Log-Msg "Erro geral durante o processamento: $($_.Exception.Message)"
-    } finally {
+    }
+    finally {
         if ($wb) {
             $wb.Save()
             $wb.Close($false)
@@ -1047,12 +1330,41 @@ function Executar-Envio($somentePrimeiro = $false) {
     }
 }
 
+# Botoes de Configuracao e Recalculo
+$BtnCarregarColunas.Add_Click({
+    Carregar-Colunas-Mapeamento $null
+})
+
+$BtnRecalcular.Add_Click({
+    Log-Msg "Recalculando previa com novas regras de limite e 2a mensagem..."
+    Carregar-Previa-Dados
+    Salvar-Configuracoes
+})
+
+$BtnSalvarConfig.Add_Click({
+    Salvar-Configuracoes
+    [System.Windows.MessageBox]::Show("Configurações salvas com sucesso em config.json!`n`nNa próxima vez que o aplicativo for aberto, a planilha, aba, colunas e regras serão restauradas automaticamente.", "Configurações Salvas", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+})
+
+$BtnVerUltimoResumo.Add_Click({
+    Exibir-Janela-Resumo
+})
+
 # Botoes de Disparo
 $BtnIniciar.Add_Click({ Executar-Envio $false })
 $BtnTestarUm.Add_Click({ Executar-Envio $true })
 $BtnParar.Add_Click({
     $global:PararSolicitado = $true
     Log-Msg "Solicitacao de parada enviada. Aguardando conclusao do item atual..."
+})
+
+# Eventos de Inicializacao e Salvamento Automatico
+$window.Add_ContentRendered({
+    Carregar-Configuracoes
+})
+
+$window.Add_Closing({
+    Salvar-Configuracoes
 })
 
 # Exibir a Janela Principal

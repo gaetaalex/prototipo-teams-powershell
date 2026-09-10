@@ -1,0 +1,19 @@
+﻿{
+    "CaminhoPlanilha":  "W:\\N8N\\SISTEMA BANCO\\prototipo_teams_manual\\dados\\Curadoria Cockpit Brasil.xlsx",
+    "AbaSelecionada":  "COCKPIT SPLUNK",
+    "ColMatricula":  "MATRICULA",
+    "ColNome":  "USUARIO",
+    "ColMensagem1":  "TEXTO DE CONTATO",
+    "ColMensagem2":  "TEXTO SEGUNDO CONTATO",
+    "ColStatus":  "STATUS ENVIO",
+    "ColNumero":  "NUMERO DE CONTATO",
+    "ColUltimaData":  "ULTIMA DATA DE CONTATO",
+    "ColEmail":  "MATRICULA",
+    "MaxContatos":  "2",
+    "DiasSegundo":  "3",
+    "FormatoEmail":  "{matricula}",
+    "EsperaTeams":  "4",
+    "IntervaloEnvio":  "3",
+    "ConfirmarEnvio":  false,
+    "ModoSimulacao":  false
+}
