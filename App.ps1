@@ -28,6 +28,12 @@ public class TeamsHelper {
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int X, int Y);
 
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
     public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
     public const uint MOUSEEVENTF_LEFTUP = 0x04;
 
@@ -37,6 +43,13 @@ public class TeamsHelper {
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    public static void FocarJanela(IntPtr hwnd) {
+        if (hwnd != IntPtr.Zero) {
+            ShowWindow(hwnd, 9); // SW_RESTORE
+            SetForegroundWindow(hwnd);
+        }
     }
 
     public static void ClicarNoCampoMensagem() {
@@ -1141,35 +1154,42 @@ function Executar-Envio($somentePrimeiro = $false) {
                 }
                 else {
                     # 1. Abrir ou focar o Teams nativo
-                    Start-Process "msteams:/l/chat/0/0"
+                    # O protocolo com users= ja localiza e abre o chat diretamente no Teams do Banco ou Pessoal
+                    $destUri = [System.Uri]::EscapeDataString($c.Destinatario)
+                    Start-Process "msteams:/l/chat/0/0?users=$destUri"
                     Start-Sleep -Seconds $esperaTeams
 
-                    # 2. Trazer Teams para foco absoluto
+                    # 2. Trazer Teams para foco absoluto (suporta Novo Teams 'ms-teams' e Classico 'Teams')
                     try {
+                        $procTeams = Get-Process -Name "ms-teams", "Teams" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1
+                        if ($procTeams) {
+                            [TeamsHelper]::FocarJanela($procTeams.MainWindowHandle)
+                            Start-Sleep -Milliseconds 300
+                        }
                         $wshell = New-Object -ComObject WScript.Shell
                         $wshell.AppActivate("Teams") | Out-Null
                         $wshell.AppActivate("Microsoft Teams") | Out-Null
                         [Microsoft.VisualBasic.Interaction]::AppActivate("Teams")
-                        Start-Sleep -Milliseconds 400
+                        Start-Sleep -Milliseconds 500
                     }
                     catch { }
 
-                    # 3. Iniciar nova conversa limpa (Ctrl+N no Teams)
-                    # Garante que o cursor vá direto para o campo 'Para:'
+                    # 3. Fechar qualquer menu pendente e iniciar nova conversa limpa (Ctrl+N)
+                    [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+                    Start-Sleep -Milliseconds 200
                     [System.Windows.Forms.SendKeys]::SendWait("^n")
-                    Start-Sleep -Milliseconds 800
+                    Start-Sleep -Milliseconds 1200
 
-                    # 4. Digitar o destinatario (Alex Gaeta, matricula ou email) no campo 'Para:'
+                    # 4. Digitar o destinatario (matricula, email ou nome) no campo 'Para:'
+                    # Nota: Nao usamos Ctrl+A para evitar selecionar o historico caso o Teams demore a abrir
                     [System.Windows.Forms.Clipboard]::SetText($c.Destinatario)
-                    [System.Windows.Forms.SendKeys]::SendWait("^a")
-                    Start-Sleep -Milliseconds 100
                     [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
                     Start-Sleep -Milliseconds 100
                     [System.Windows.Forms.SendKeys]::SendWait("^v")
                     Log-Msg "  Digitando destinatario '$($c.Destinatario)' no campo Para..."
 
                     # 5. Aguardar o Teams buscar e sugerir o contato no dropdown
-                    Start-Sleep -Milliseconds 1800
+                    Start-Sleep -Milliseconds 2000
 
                     # 6. Selecionar o PRIMEIRO contato sugerido na lista
                     # No Teams, o primeiro resultado da busca ja vem destacado por padrao.
@@ -1191,11 +1211,9 @@ function Executar-Envio($somentePrimeiro = $false) {
                         Start-Sleep -Milliseconds 300
                     } catch { }
 
-                    # 8. Limpar qualquer rascunho anterior que estivesse no campo de mensagem
-                    [System.Windows.Forms.SendKeys]::SendWait("^a")
-                    Start-Sleep -Milliseconds 100
+                    # 8. Limpar qualquer caractere residual do campo de mensagem com seguranca
                     [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
-                    Start-Sleep -Milliseconds 200
+                    Start-Sleep -Milliseconds 150
 
                     # 9. Copiar e colar a mensagem personalizada atualizada
                     [System.Windows.Forms.Clipboard]::SetText($c.Mensagem)
