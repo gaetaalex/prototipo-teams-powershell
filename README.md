@@ -32,6 +32,13 @@ Aplicação desktop com interface gráfica nativa em PowerShell (WPF) para envio
 6. **Segurança com Backup Automático:**
    - Cria uma cópia de segurança do Excel com carimbo de data e hora antes de qualquer disparo.
 
+7. **Identificação e Registro do Analista (Quem Enviou):**
+   - Detecção automática do usuário logado no Windows / Teams / Active Directory corporativo.
+   - Campo editável **`Nome do Analista (Registro)`** para conferência antes do envio.
+   - Mapeamento dinâmico no campo **`Coluna Analista (Planilha)`** (ex: `ANALISTA`, `RESPONSAVEL`, `OPERADOR`).
+   - A cada envio com sucesso, grava automaticamente o nome do analista na célula correspondente da linha na planilha Excel.
+   - O nome do analista também é exibido na **Janela de Resumo** e salvo no **Relatório CSV exportado**.
+
 ---
 
 ## Como Usar

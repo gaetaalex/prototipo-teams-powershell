@@ -248,6 +248,7 @@ public class TeamsHelper {
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -285,13 +286,23 @@ public class TeamsHelper {
                 </StackPanel>
 
                 <!-- Coluna 4 -->
-                <StackPanel Grid.Row="0" Grid.Column="3" Margin="0,0,0,4">
+                <StackPanel Grid.Row="0" Grid.Column="3" Margin="0,0,8,4">
                     <Label Content="Ultima Data de Contato:"/>
                     <ComboBox x:Name="CmbColUltimaData"/>
                 </StackPanel>
-                <StackPanel Grid.Row="1" Grid.Column="3" Margin="0,0,0,0">
+                <StackPanel Grid.Row="1" Grid.Column="3" Margin="0,0,8,0">
                     <Label Content="E-mail Teams Direto (opcional):"/>
                     <ComboBox x:Name="CmbColEmail"/>
+                </StackPanel>
+
+                <!-- Coluna 5: Analista / Quem enviou -->
+                <StackPanel Grid.Row="0" Grid.Column="4" Margin="0,0,0,4">
+                    <Label Content="Coluna Analista (Planilha):" FontWeight="SemiBold"/>
+                    <ComboBox x:Name="CmbColAnalista" ToolTip="Selecione a coluna da planilha Excel onde será gravado quem enviou a mensagem (ex: ANALISTA)"/>
+                </StackPanel>
+                <StackPanel Grid.Row="1" Grid.Column="4" Margin="0,0,0,0">
+                    <Label Content="Nome do Analista (Registro):" FontWeight="SemiBold"/>
+                    <TextBox x:Name="TxtNomeAnalista" ToolTip="Nome ou matricula do analista gravado na planilha a cada envio com sucesso"/>
                 </StackPanel>
             </Grid>
         </GroupBox>
@@ -537,7 +548,8 @@ public class TeamsHelper {
                     <DataGridTextColumn Header="Linha" Binding="{Binding Linha}" Width="45"/>
                     <DataGridTextColumn Header="Matricula" Binding="{Binding Matricula}" Width="75"/>
                     <DataGridTextColumn Header="Nome" Binding="{Binding Nome}" Width="120"/>
-                    <DataGridTextColumn Header="Destinatario" Binding="{Binding Destinatario}" Width="140"/>
+                    <DataGridTextColumn Header="Destinatario" Binding="{Binding Destinatario}" Width="130"/>
+                    <DataGridTextColumn Header="Analista" Binding="{Binding Analista}" Width="90"/>
                     <DataGridTextColumn Header="Tipo Msg" Binding="{Binding Tipo}" Width="85"/>
                     <DataGridTextColumn Header="Resultado" Binding="{Binding Resultado}" Width="95"/>
                     <DataGridTextColumn Header="Motivo / Detalhe do Envio" Binding="{Binding Motivo}" Width="*"/>
@@ -585,6 +597,8 @@ $CmbColStatus = $window.FindName("CmbColStatus")
 $CmbColNumero = $window.FindName("CmbColNumero")
 $CmbColUltimaData = $window.FindName("CmbColUltimaData")
 $CmbColEmail = $window.FindName("CmbColEmail")
+$CmbColAnalista = $window.FindName("CmbColAnalista")
+$TxtNomeAnalista = $window.FindName("TxtNomeAnalista")
 
 $TxtMaxContatos = $window.FindName("TxtMaxContatos")
 $TxtDiasSegundo = $window.FindName("TxtDiasSegundo")
@@ -631,6 +645,40 @@ function Log-Msg($msg, $destaque = $false) {
 function Normalizar-Texto($txt) {
     if ([string]::IsNullOrWhiteSpace($txt)) { return "" }
     return ($txt.Trim().ToLower() -replace '[^a-z0-9]', '')
+}
+
+# Obter nome ou display name do analista/usuario logado no Windows/Teams/AD
+function Obter-Nome-Analista-Padrao {
+    $fullName = ""
+    try {
+        Add-Type -AssemblyName System.DirectoryServices.AccountManagement -ErrorAction SilentlyContinue
+        $user = [System.DirectoryServices.AccountManagement.UserPrincipal]::Current
+        if ($user -and $user.DisplayName) { $fullName = $user.DisplayName.Trim() }
+    } catch {}
+
+    if ([string]::IsNullOrWhiteSpace($fullName)) {
+        try {
+            $adsi = [adsi]"WinNT://$env:USERDOMAIN/$env:USERNAME,user"
+            if ($adsi.FullName) { $fullName = [string]$adsi.FullName.ToString().Trim() }
+        } catch {}
+    }
+
+    if ([string]::IsNullOrWhiteSpace($fullName)) {
+        try {
+            $wmi = Get-CimInstance Win32_UserAccount -Filter "Name='$($env:USERNAME)' and Domain='$($env:USERDOMAIN)'" -ErrorAction SilentlyContinue
+            if ($wmi -and $wmi.FullName) { $fullName = $wmi.FullName.Trim() }
+        } catch {}
+    }
+
+    if ([string]::IsNullOrWhiteSpace($fullName)) {
+        $fullName = if ($env:USERNAME) { $env:USERNAME.Trim() } else { "Analista" }
+    }
+    return $fullName
+}
+
+# Inicializar o campo do analista com o usuario detectado
+if ($TxtNomeAnalista) {
+    $TxtNomeAnalista.Text = Obter-Nome-Analista-Padrao
 }
 
 # Procurar Planilha via Dialogo nativo
@@ -748,6 +796,8 @@ function Salvar-Configuracoes {
         ColNumero       = $CmbColNumero.Text
         ColUltimaData   = $CmbColUltimaData.Text
         ColEmail        = $CmbColEmail.Text
+        ColAnalista     = $CmbColAnalista.Text
+        NomeAnalista    = $TxtNomeAnalista.Text
         MaxContatos     = $TxtMaxContatos.Text
         DiasSegundo     = $TxtDiasSegundo.Text
         FormatoEmail    = $TxtFormatoEmail.Text
@@ -946,6 +996,7 @@ function Carregar-Colunas-Mapeamento($salvos = $null) {
         $valSalvoNum = if ($salvos) { $salvos.ColNumero } else { $null }
         $valSalvoData = if ($salvos) { $salvos.ColUltimaData } else { $null }
         $valSalvoEmail = if ($salvos) { $salvos.ColEmail } else { $null }
+        $valSalvoAnalista = if ($salvos) { $salvos.ColAnalista } else { $null }
 
         Popular-Combo-Colunas $CmbColMatricula $global:ColunasDetectadas @("matricula", "id", "chapa") $true $valSalvoMat
         Popular-Combo-Colunas $CmbColNome $global:ColunasDetectadas @("usuario", "nome") $true $valSalvoNome
@@ -955,6 +1006,11 @@ function Carregar-Colunas-Mapeamento($salvos = $null) {
         Popular-Combo-Colunas $CmbColNumero $global:ColunasDetectadas @("numero de contato", "numero contato", "contatos") $true $valSalvoNum
         Popular-Combo-Colunas $CmbColUltimaData $global:ColunasDetectadas @("ultima data de contato", "ultima data", "data contato") $true $valSalvoData
         Popular-Combo-Colunas $CmbColEmail $global:ColunasDetectadas @("email_teams", "email", "upn", "matricula") $false $valSalvoEmail
+        Popular-Combo-Colunas $CmbColAnalista $global:ColunasDetectadas @("analista", "responsavel", "operador", "enviado por", "usuario envio", "autor", "quem enviou") $false $valSalvoAnalista
+
+        if ($salvos -and -not [string]::IsNullOrWhiteSpace($salvos.NomeAnalista)) {
+            $TxtNomeAnalista.Text = $salvos.NomeAnalista
+        }
 
         Log-Msg "Mapeamento preenchido. Carregando previa dos dados..."
         Carregar-Previa-Dados
@@ -990,6 +1046,7 @@ function Carregar-Configuracoes {
         if ($cfg.FormatoEmail) { $TxtFormatoEmail.Text = $cfg.FormatoEmail }
         if ($cfg.EsperaTeams) { $TxtEsperaTeams.Text = $cfg.EsperaTeams }
         if ($cfg.IntervaloEnvio) { $TxtIntervaloEnvio.Text = $cfg.IntervaloEnvio }
+        if ($cfg.NomeAnalista) { $TxtNomeAnalista.Text = $cfg.NomeAnalista }
         if ($null -ne $cfg.ConfirmarEnvio) { $ChkConfirmarEnvio.IsChecked = [bool]$cfg.ConfirmarEnvio }
         if ($null -ne $cfg.ModoSimulacao) { $ChkModoSimulacao.IsChecked = [bool]$cfg.ModoSimulacao }
 
@@ -1084,8 +1141,11 @@ function Executar-Envio($somentePrimeiro = $false) {
     $aba = $CmbAbas.Text
     $colMsg1 = Obter-Indice-Coluna $CmbColMensagem1.Text
     $colMsg2 = Obter-Indice-Coluna $CmbColMensagem2.Text
+    $colStatus = Obter-Indice-Coluna $CmbColStatus.Text
     $colNum = Obter-Indice-Coluna $CmbColNumero.Text
     $colData = Obter-Indice-Coluna $CmbColUltimaData.Text
+    $colAnalista = Obter-Indice-Coluna $CmbColAnalista.Text
+    $nomeAnalista = if ($TxtNomeAnalista -and -not [string]::IsNullOrWhiteSpace($TxtNomeAnalista.Text)) { $TxtNomeAnalista.Text.Trim() } else { Obter-Nome-Analista-Padrao }
     $esperaTeams = [int]$TxtEsperaTeams.Text
     $intervalo = [int]$TxtIntervaloEnvio.Text
     $simulacao = [bool]$ChkModoSimulacao.IsChecked
@@ -1099,12 +1159,12 @@ function Executar-Envio($somentePrimeiro = $false) {
 
     if ($somentePrimeiro) {
         $aptos = @($aptos[0])
-        Log-Msg "Modo Teste: Enviando apenas para o primeiro contato ($($aptos[0].Matricula))...", $true
+        Log-Msg "Modo Teste: Enviando apenas para o primeiro contato ($($aptos[0].Matricula)) por '$nomeAnalista'...", $true
     }
     else {
-        $resp = [System.Windows.MessageBox]::Show("Confirmar inicio do disparo automatico para $($aptos.Count) contatos aptos?", "Confirmacao de Envio", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)
+        $resp = [System.Windows.MessageBox]::Show("Confirmar inicio do disparo automatico para $($aptos.Count) contatos aptos?`n`nAnalista responsavel: $nomeAnalista", "Confirmacao de Envio", [System.Windows.MessageBoxButton]::YesNo, [System.Windows.MessageBoxImage]::Question)
         if ($resp -ne [System.Windows.MessageBoxResult]::Yes) { return }
-        Log-Msg "Iniciando disparo em massa para $($aptos.Count) contatos...", $true
+        Log-Msg "Iniciando disparo em massa para $($aptos.Count) contatos por '$nomeAnalista'...", $true
     }
 
     # Criar backup antes de iniciar
@@ -1160,6 +1220,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                         Matricula    = $itemPendente.Matricula
                         Nome         = $itemPendente.Nome
                         Destinatario = $itemPendente.Destinatario
+                        Analista     = $nomeAnalista
                         Tipo         = $itemPendente.TipoMensagem
                         Resultado    = "Nao Enviado"
                         Motivo       = "Interrompido pelo operador antes do envio (Excel nao alterado)"
@@ -1170,7 +1231,7 @@ function Executar-Envio($somentePrimeiro = $false) {
             }
 
             $TxtStatusGeral.Text = "Processando $($i+1) de $($aptos.Count): $($c.Nome) ($($c.Matricula))..."
-            Log-Msg "[$($i+1)/$($aptos.Count)] Destinatario: $($c.Destinatario) | Tipo: $($c.TipoMensagem) | Matricula: $($c.Matricula)"
+            Log-Msg "[$($i+1)/$($aptos.Count)] Destinatario: $($c.Destinatario) | Tipo: $($c.TipoMensagem) | Matricula: $($c.Matricula) | Analista: $nomeAnalista"
 
             # Validar destinatario e mensagem antes de disparar
             if ([string]::IsNullOrWhiteSpace($c.Destinatario)) {
@@ -1182,6 +1243,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                     Matricula    = $c.Matricula
                     Nome         = $c.Nome
                     Destinatario = $c.Destinatario
+                    Analista     = $nomeAnalista
                     Tipo         = $c.TipoMensagem
                     Resultado    = "Erro"
                     Motivo       = "$erroMsg (Excel preservado)"
@@ -1224,6 +1286,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                     Matricula    = $c.Matricula
                     Nome         = $c.Nome
                     Destinatario = $c.Destinatario
+                    Analista     = $nomeAnalista
                     Tipo         = $c.TipoMensagem
                     Resultado    = "Erro"
                     Motivo       = "$erroMsg (Excel preservado)"
@@ -1388,8 +1451,22 @@ function Executar-Envio($somentePrimeiro = $false) {
                                 }
                             }
 
+                            # 4. Atualizar nome do analista na planilha se coluna estiver configurada
+                            if ($colAnalista -gt 0 -and -not [string]::IsNullOrWhiteSpace($nomeAnalista)) {
+                                try {
+                                    $ws.Cells.Item([int]$c.Linha, [int]$colAnalista).NumberFormat = "@"
+                                    $ws.Cells.Item([int]$c.Linha, [int]$colAnalista).Value = $nomeAnalista
+                                } catch {
+                                    try {
+                                        $ws.Cells.Item([int]$c.Linha, [int]$colAnalista).Value2 = $nomeAnalista
+                                    } catch {
+                                        $ws.Cells.Item([int]$c.Linha, [int]$colAnalista) = $nomeAnalista
+                                    }
+                                }
+                            }
+
                             $wb.Save()
-                            Log-Msg "  -> Mensagem enviada e planilha atualizada com sucesso!"
+                            Log-Msg "  -> Mensagem enviada por '$nomeAnalista' e planilha atualizada com sucesso!"
                         }
                         catch {
                             Log-Msg "  -> Mensagem enviada no Teams, mas houve aviso ao salvar no Excel: $($_.Exception.Message)"
@@ -1404,6 +1481,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                             Matricula    = $c.Matricula
                             Nome         = $c.Nome
                             Destinatario = $c.Destinatario
+                            Analista     = $nomeAnalista
                             Tipo         = $c.TipoMensagem
                             Resultado    = "Sucesso"
                             Motivo       = "Enviado com sucesso no Teams e confirmado no Excel"
@@ -1417,6 +1495,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                             Matricula    = $c.Matricula
                             Nome         = $c.Nome
                             Destinatario = $c.Destinatario
+                            Analista     = $nomeAnalista
                             Tipo         = $c.TipoMensagem
                             Resultado    = "Erro"
                             Motivo       = "Envio nao confirmado no Teams (Excel NAO alterado)"
@@ -1435,6 +1514,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                     Matricula    = $c.Matricula
                     Nome         = $c.Nome
                     Destinatario = $c.Destinatario
+                    Analista     = $nomeAnalista
                     Tipo         = $c.TipoMensagem
                     Resultado    = "Erro"
                     Motivo       = "$erroEx (Excel preservado)"
