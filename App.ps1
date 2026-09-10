@@ -1283,7 +1283,10 @@ function Executar-Envio($somentePrimeiro = $false) {
                     Start-Sleep -Milliseconds 2800
 
                     # 8. Selecionar o colaborador sugerido na pesquisa e abrir o chat direto
-                    # Seta para baixo vai para o primeiro resultado de Pessoas e Enter abre a conversa direta
+                    # O Novo Teams exibe uma linha de filtros (from:...) antes do colaborador.
+                    # Pressionamos 2 vezes a seta para baixo ({DOWN}) para selecionar o colaborador e Enter para abrir o chat.
+                    [System.Windows.Forms.SendKeys]::SendWait("{DOWN}")
+                    Start-Sleep -Milliseconds 250
                     [System.Windows.Forms.SendKeys]::SendWait("{DOWN}")
                     Start-Sleep -Milliseconds 300
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
