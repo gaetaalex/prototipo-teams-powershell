@@ -13,14 +13,26 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 # Helper nativo Win32 para foco confiavel, maximizacao e clique no Teams
 Add-Type @"
 using System;
+using System.Text;
 using System.Runtime.InteropServices;
 
 public class TeamsHelper {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    public static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+
     [DllImport("user32.dll")]
     public static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    public static extern bool IsWindowVisible(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     [DllImport("user32.dll")]
     public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
@@ -37,12 +49,6 @@ public class TeamsHelper {
     [DllImport("user32.dll")]
     public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
 
-    [DllImport("user32.dll")]
-    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr ProcessId);
-
-    [DllImport("user32.dll")]
-    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-
     public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
     public const uint MOUSEEVENTF_LEFTUP = 0x04;
     public const int SW_MAXIMIZE = 3;
@@ -55,23 +61,71 @@ public class TeamsHelper {
         public int Bottom;
     }
 
+    public static IntPtr ObterJanelaTeams() {
+        IntPtr foundHwnd = IntPtr.Zero;
+        EnumWindows((hWnd, lParam) => {
+            if (IsWindowVisible(hWnd)) {
+                RECT rect;
+                if (GetWindowRect(hWnd, out rect)) {
+                    int w = rect.Right - rect.Left;
+                    int h = rect.Bottom - rect.Top;
+                    if (w > 500 && h > 300) {
+                        uint pid = 0;
+                        GetWindowThreadProcessId(hWnd, out pid);
+                        try {
+                            System.Diagnostics.Process p = System.Diagnostics.Process.GetProcessById((int)pid);
+                            if (p.ProcessName.IndexOf("teams", StringComparison.OrdinalIgnoreCase) >= 0) {
+                                foundHwnd = hWnd;
+                                return false; // Encontrou a janela principal do Teams
+                            }
+                        } catch {}
+                    }
+                }
+            }
+            return true;
+        }, IntPtr.Zero);
+        return foundHwnd;
+    }
+
     public static void AtivarEMaximizar(IntPtr hwnd) {
-        if (hwnd == IntPtr.Zero) return;
-        // SW_MAXIMIZE (3) garante que o Teams fique ou continue em tela cheia maximizada, sem diminuir a tela
-        ShowWindow(hwnd, SW_MAXIMIZE);
-        // Simula clique da tecla ALT para contornar a restricao de foco do Windows (Focus Stealing Prevention)
-        keybd_event(0x12, 0, 0, 0); // ALT Down
-        keybd_event(0x12, 0, 2, 0); // ALT Up
-        SetForegroundWindow(hwnd);
-        ShowWindow(hwnd, SW_MAXIMIZE);
+        if (hwnd == IntPtr.Zero) {
+            hwnd = ObterJanelaTeams();
+        }
+        if (hwnd != IntPtr.Zero) {
+            ShowWindow(hwnd, SW_MAXIMIZE);
+            keybd_event(0x12, 0, 0, 0); // ALT Down
+            keybd_event(0x12, 0, 2, 0); // ALT Up
+            SetForegroundWindow(hwnd);
+            ShowWindow(hwnd, SW_MAXIMIZE);
+        }
     }
 
     public static void FocarJanela(IntPtr hwnd) {
         AtivarEMaximizar(hwnd);
     }
 
+    public static void ClicarNaBarraPesquisa() {
+        IntPtr hwnd = ObterJanelaTeams();
+        if (hwnd == IntPtr.Zero) {
+            hwnd = GetForegroundWindow();
+        }
+        RECT rect;
+        if (GetWindowRect(hwnd, out rect)) {
+            int w = rect.Right - rect.Left;
+            // A barra "Pesquisar (Ctrl+E)" fica centralizada no topo e a ~24px abaixo da borda superior
+            int targetX = rect.Left + (w / 2);
+            int targetY = rect.Top + 24;
+            SetCursorPos(targetX, targetY);
+            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+        }
+    }
+
     public static void ClicarNoCampoMensagem() {
-        IntPtr hwnd = GetForegroundWindow();
+        IntPtr hwnd = ObterJanelaTeams();
+        if (hwnd == IntPtr.Zero) {
+            hwnd = GetForegroundWindow();
+        }
         RECT rect;
         if (GetWindowRect(hwnd, out rect)) {
             int w = rect.Right - rect.Left;
@@ -86,7 +140,10 @@ public class TeamsHelper {
     }
 
     public static void ClicarNoBotaoEnviar() {
-        IntPtr hwnd = GetForegroundWindow();
+        IntPtr hwnd = ObterJanelaTeams();
+        if (hwnd == IntPtr.Zero) {
+            hwnd = GetForegroundWindow();
+        }
         RECT rect;
         if (GetWindowRect(hwnd, out rect)) {
             // O botao Enviar (icone de aviao/seta) fica no canto inferior direito da caixa de chat
@@ -1189,29 +1246,25 @@ function Executar-Envio($somentePrimeiro = $false) {
                     Start-Process "msteams:/l/chat/0/0"
                     Start-Sleep -Seconds $esperaTeams
 
-                    # 2. Trazer Teams para foco absoluto e tela maximizada (sem diminuir a tela)
+                    # 2. Localizar janela real do Teams, focar e maximizar (funciona 100% no Novo Teams WebView2)
                     try {
-                        $procTeams = Get-Process -Name "ms-teams", "Teams" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1
-                        if ($procTeams) {
-                            [TeamsHelper]::AtivarEMaximizar($procTeams.MainWindowHandle)
-                            Start-Sleep -Milliseconds 400
-                        }
-                        $wshell = New-Object -ComObject WScript.Shell
-                        $wshell.AppActivate("Teams") | Out-Null
-                        $wshell.AppActivate("Microsoft Teams") | Out-Null
-                        [Microsoft.VisualBasic.Interaction]::AppActivate("Teams")
-                        Start-Sleep -Milliseconds 300
+                        [TeamsHelper]::AtivarEMaximizar([IntPtr]::Zero)
+                        Start-Sleep -Milliseconds 400
                     }
                     catch { }
 
                     # 3. Fechar qualquer menu ou popup aberto com ESC
                     [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
-                    Start-Sleep -Milliseconds 250
+                    Start-Sleep -Milliseconds 200
 
-                    # 4. ACESSAR A BARRA DE PESQUISA DO TEAMS VIA ATALHO UNIVERSAL CTRL+E
-                    # O atalho Ctrl+E coloca o cursor de texto diretamente dentro de 'Pesquisar (Ctrl+E)' no topo do Teams
+                    # 4. ACESSAR A BARRA DE PESQUISA: Clique fisico centralizado na barra Pesquisar + atalho Ctrl+E
+                    # O clique na barra transfere o foco fisico do Windows para o Teams e ativa o cursor
+                    try {
+                        [TeamsHelper]::ClicarNaBarraPesquisa()
+                        Start-Sleep -Milliseconds 300
+                    } catch { }
                     [System.Windows.Forms.SendKeys]::SendWait("^e")
-                    Start-Sleep -Milliseconds 700
+                    Start-Sleep -Milliseconds 400
 
                     # 5. Limpar qualquer busca anterior na barra com Backspace seguro
                     [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}{BACKSPACE}{BACKSPACE}{BACKSPACE}{BACKSPACE}")
