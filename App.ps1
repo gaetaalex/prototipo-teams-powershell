@@ -10,7 +10,7 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, Sys
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
-# Helper nativo Win32 para foco e clique confiavel na caixa de mensagem do Teams
+# Helper nativo Win32 para foco confiavel, maximizacao e clique no Teams
 Add-Type @"
 using System;
 using System.Runtime.InteropServices;
@@ -34,8 +34,18 @@ public class TeamsHelper {
     [DllImport("user32.dll")]
     public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
+
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr ProcessId);
+
+    [DllImport("user32.dll")]
+    public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
     public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
     public const uint MOUSEEVENTF_LEFTUP = 0x04;
+    public const int SW_MAXIMIZE = 3;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT {
@@ -45,10 +55,37 @@ public class TeamsHelper {
         public int Bottom;
     }
 
+    public static void AtivarEMaximizar(IntPtr hwnd) {
+        if (hwnd == IntPtr.Zero) return;
+        // SW_MAXIMIZE (3) garante que o Teams fique ou continue em tela cheia maximizada, sem diminuir a tela
+        ShowWindow(hwnd, SW_MAXIMIZE);
+        // Simula clique da tecla ALT para contornar a restricao de foco do Windows (Focus Stealing Prevention)
+        keybd_event(0x12, 0, 0, 0); // ALT Down
+        keybd_event(0x12, 0, 2, 0); // ALT Up
+        SetForegroundWindow(hwnd);
+        ShowWindow(hwnd, SW_MAXIMIZE);
+    }
+
     public static void FocarJanela(IntPtr hwnd) {
-        if (hwnd != IntPtr.Zero) {
-            ShowWindow(hwnd, 9); // SW_RESTORE
-            SetForegroundWindow(hwnd);
+        AtivarEMaximizar(hwnd);
+    }
+
+    public static void ClicarNoCampoPara() {
+        IntPtr hwnd = GetForegroundWindow();
+        RECT rect;
+        if (GetWindowRect(hwnd, out rect)) {
+            int w = rect.Right - rect.Left;
+            // No Teams maximizado, o campo "Para:" fica logo apos a lista de chats (~380px) e a ~85px do topo
+            int targetX;
+            if (w > 800) {
+                targetX = rect.Left + 470;
+            } else {
+                targetX = rect.Left + (int)(w * 0.45);
+            }
+            int targetY = rect.Top + 85;
+            SetCursorPos(targetX, targetY);
+            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
         }
     }
 
@@ -1154,74 +1191,82 @@ function Executar-Envio($somentePrimeiro = $false) {
                 }
                 else {
                     # 1. Abrir ou focar o Teams nativo
-                    # O protocolo com users= ja localiza e abre o chat diretamente no Teams do Banco ou Pessoal
-                    $destUri = [System.Uri]::EscapeDataString($c.Destinatario)
-                    Start-Process "msteams:/l/chat/0/0?users=$destUri"
+                    # O protocolo msteams:/l/chat/0/0 abre a tela de chat do Teams diretamente
+                    Start-Process "msteams:/l/chat/0/0"
                     Start-Sleep -Seconds $esperaTeams
 
-                    # 2. Trazer Teams para foco absoluto (suporta Novo Teams 'ms-teams' e Classico 'Teams')
+                    # 2. Trazer Teams para foco absoluto e tela maximizada (sem diminuir a tela)
                     try {
                         $procTeams = Get-Process -Name "ms-teams", "Teams" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1
                         if ($procTeams) {
-                            [TeamsHelper]::FocarJanela($procTeams.MainWindowHandle)
-                            Start-Sleep -Milliseconds 300
+                            [TeamsHelper]::AtivarEMaximizar($procTeams.MainWindowHandle)
+                            Start-Sleep -Milliseconds 400
                         }
                         $wshell = New-Object -ComObject WScript.Shell
                         $wshell.AppActivate("Teams") | Out-Null
                         $wshell.AppActivate("Microsoft Teams") | Out-Null
                         [Microsoft.VisualBasic.Interaction]::AppActivate("Teams")
-                        Start-Sleep -Milliseconds 500
+                        Start-Sleep -Milliseconds 300
                     }
                     catch { }
 
-                    # 3. Fechar qualquer menu pendente e iniciar nova conversa limpa (Ctrl+N)
-                    [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
-                    Start-Sleep -Milliseconds 200
+                    # 3. Iniciar nova conversa limpa (Ctrl+N)
                     [System.Windows.Forms.SendKeys]::SendWait("^n")
-                    Start-Sleep -Milliseconds 1200
+                    Start-Sleep -Milliseconds 800
 
-                    # 4. Digitar o destinatario (matricula, email ou nome) no campo 'Para:'
-                    # Nota: Nao usamos Ctrl+A para evitar selecionar o historico caso o Teams demore a abrir
-                    [System.Windows.Forms.Clipboard]::SetText($c.Destinatario)
-                    [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
+                    # 4. Clique fisico assistido exatamente no campo 'Para:' para garantir o cursor ativo
+                    try {
+                        [TeamsHelper]::ClicarNoCampoPara()
+                        Start-Sleep -Milliseconds 300
+                    } catch { }
+
+                    # 5. Limpar qualquer caractere residual do campo Para
+                    [System.Windows.Forms.SendKeys]::SendWait("^a{BACKSPACE}")
+                    Start-Sleep -Milliseconds 150
+
+                    # 6. Digitar o destinatario (matricula ou email)
+                    $destLimpo = $c.Destinatario.Trim()
+                    Log-Msg "  Digitando destinatario '$destLimpo' no campo Para..."
+                    [System.Windows.Forms.Clipboard]::SetText($destLimpo)
                     Start-Sleep -Milliseconds 100
                     [System.Windows.Forms.SendKeys]::SendWait("^v")
-                    Log-Msg "  Digitando destinatario '$($c.Destinatario)' no campo Para..."
+                    Start-Sleep -Milliseconds 200
 
-                    # 5. Aguardar o Teams buscar e sugerir o contato no dropdown
-                    Start-Sleep -Milliseconds 2000
+                    # Pequeno toque para acionar o autocomplete do Active Directory / Entra ID do Santander
+                    [System.Windows.Forms.SendKeys]::SendWait(" {BACKSPACE}")
 
-                    # 6. Selecionar o PRIMEIRO contato sugerido na lista
-                    # No Teams, o primeiro resultado da busca ja vem destacado por padrao.
+                    # 7. Aguardar o Teams buscar e sugerir o contato no dropdown
+                    Start-Sleep -Milliseconds 2500
+
+                    # 8. Selecionar o PRIMEIRO contato sugerido na lista
+                    # Seta para baixo destaca o primeiro resultado da busca corporativa e Enter confirma
+                    [System.Windows.Forms.SendKeys]::SendWait("{DOWN}")
+                    Start-Sleep -Milliseconds 300
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
                     Start-Sleep -Milliseconds 800
 
-                    # 7. Garantir foco no campo "Digite uma mensagem" (sem selecionar anexos ou historico)
-                    # A) Fechar qualquer menu/popup residual com ESC
-                    [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+                    # 9. Garantir foco no campo "Digite uma mensagem"
+                    # Atalho oficial da Microsoft Teams para caixa de mensagem: Alt + Shift + C
+                    [System.Windows.Forms.SendKeys]::SendWait("%+c")
                     Start-Sleep -Milliseconds 200
 
-                    # B) Atalho oficial da Microsoft Teams para caixa de mensagem: Alt + Shift + C
-                    [System.Windows.Forms.SendKeys]::SendWait("%+c")
-                    Start-Sleep -Milliseconds 300
-
-                    # C) Clique fisico automatizado no campo "Digite uma mensagem" no rodape da janela
+                    # Clique fisico automatizado no campo "Digite uma mensagem" no rodape da janela
                     try {
                         [TeamsHelper]::ClicarNoCampoMensagem()
                         Start-Sleep -Milliseconds 300
                     } catch { }
 
-                    # 8. Limpar qualquer caractere residual do campo de mensagem com seguranca
-                    [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
+                    # 10. Limpar qualquer caractere residual do campo de mensagem
+                    [System.Windows.Forms.SendKeys]::SendWait("^a{BACKSPACE}")
                     Start-Sleep -Milliseconds 150
 
-                    # 9. Copiar e colar a mensagem personalizada atualizada
+                    # 11. Copiar e colar a mensagem personalizada atualizada
                     [System.Windows.Forms.Clipboard]::SetText($c.Mensagem)
                     Start-Sleep -Milliseconds 100
                     [System.Windows.Forms.SendKeys]::SendWait("^v")
                     Start-Sleep -Milliseconds 600
 
-                    # 10. Enviar a mensagem com ENTER
+                    # 12. Enviar a mensagem com ENTER
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
                     Start-Sleep -Milliseconds 800
 
@@ -1234,7 +1279,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                             "Validacao de Envio",
                             [System.Windows.MessageBoxButton]::YesNo,
                             [System.Windows.MessageBoxImage]::Question
-                        )
+                         )
                         if ($respostaOperador -eq [System.Windows.MessageBoxResult]::Yes) {
                             $sucessoItem = $true
                         }
@@ -1251,16 +1296,42 @@ function Executar-Envio($somentePrimeiro = $false) {
                     # ATUALIZAR EXCEL SOMENTE SE HOUVE SUCESSO CONFIRMADO!
                     if ($sucessoItem) {
                         try {
+                            # 1. Atualizar contagem de contatos
                             if ($colNum -gt 0) {
-                                $celNum = $ws.Cells.Item([int]$c.Linha, [int]$colNum)
-                                $celNum.Value2 = [int]$c.Numero + 1
+                                $novoNum = [int]$c.Numero + 1
+                                try {
+                                    $ws.Cells.Item([int]$c.Linha, [int]$colNum).Value = $novoNum
+                                } catch {
+                                    $ws.Cells.Item([int]$c.Linha, [int]$colNum).Value2 = [double]$novoNum
+                                }
                             }
+
+                            # 2. Atualizar data do ultimo contato (com formatacao texto segura para evitar InvalidCastException)
                             if ($colData -gt 0) {
-                                $celData = $ws.Cells.Item([int]$c.Linha, [int]$colData)
-                                $celData.Value2 = (Get-Date).ToString("dd/MM/yyyy HH:mm")
+                                $dataHoraStr = (Get-Date).ToString("dd/MM/yyyy HH:mm")
+                                try {
+                                    $ws.Cells.Item([int]$c.Linha, [int]$colData).NumberFormat = "@"
+                                    $ws.Cells.Item([int]$c.Linha, [int]$colData).Value = $dataHoraStr
+                                } catch {
+                                    try {
+                                        $ws.Cells.Item([int]$c.Linha, [int]$colData).Value2 = $dataHoraStr
+                                    } catch {
+                                        $ws.Cells.Item([int]$c.Linha, [int]$colData) = $dataHoraStr
+                                    }
+                                }
                             }
+
+                            # 3. Atualizar status do envio na planilha se coluna estiver configurada
+                            if ($colStatus -gt 0) {
+                                try {
+                                    $ws.Cells.Item([int]$c.Linha, [int]$colStatus).Value = "Enviado"
+                                } catch {
+                                    $ws.Cells.Item([int]$c.Linha, [int]$colStatus).Value2 = "Enviado"
+                                }
+                            }
+
                             $wb.Save()
-                            Log-Msg "  -> Mensagem enviada e gravada no Excel com sucesso!"
+                            Log-Msg "  -> Mensagem enviada e planilha atualizada com sucesso!"
                         }
                         catch {
                             Log-Msg "  -> Mensagem enviada no Teams, mas houve aviso ao salvar no Excel: $($_.Exception.Message)"
