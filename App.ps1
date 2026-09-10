@@ -70,18 +70,6 @@ public class TeamsHelper {
         AtivarEMaximizar(hwnd);
     }
 
-    public static void ClicarNaMoldura(IntPtr hwnd) {
-        RECT rect;
-        if (GetWindowRect(hwnd, out rect)) {
-            // Clica na barra superior neutra (fora de botoes e links) para transferir o foco ativo do Windows para a janela
-            int targetX = rect.Left + 250;
-            int targetY = rect.Top + 20;
-            SetCursorPos(targetX, targetY);
-            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        }
-    }
-
     public static void ClicarNoCampoMensagem() {
         IntPtr hwnd = GetForegroundWindow();
         RECT rect;
@@ -1206,9 +1194,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                         $procTeams = Get-Process -Name "ms-teams", "Teams" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1
                         if ($procTeams) {
                             [TeamsHelper]::AtivarEMaximizar($procTeams.MainWindowHandle)
-                            Start-Sleep -Milliseconds 300
-                            [TeamsHelper]::ClicarNaMoldura($procTeams.MainWindowHandle)
-                            Start-Sleep -Milliseconds 300
+                            Start-Sleep -Milliseconds 400
                         }
                         $wshell = New-Object -ComObject WScript.Shell
                         $wshell.AppActivate("Teams") | Out-Null
@@ -1218,46 +1204,48 @@ function Executar-Envio($somentePrimeiro = $false) {
                     }
                     catch { }
 
-                    # 3. Fechar menus anteriores e iniciar NOVA CONVERSA LIMPA (Ctrl+N)
-                    # No Teams, o atalho Ctrl+N abre o chat novo e posiciona o cursor DIRETAMENTE dentro do campo "Para:"
+                    # 3. Fechar qualquer menu ou popup aberto com ESC
                     [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
                     Start-Sleep -Milliseconds 250
-                    [System.Windows.Forms.SendKeys]::SendWait("^n")
-                    Start-Sleep -Milliseconds 1200
 
-                    # 4. Limpar qualquer caractere residual com Backspace seguro (NUNCA Ctrl+A para nao selecionar a tela inteira)
+                    # 4. ACESSAR A BARRA DE PESQUISA DO TEAMS VIA ATALHO UNIVERSAL CTRL+E
+                    # O atalho Ctrl+E coloca o cursor de texto diretamente dentro de 'Pesquisar (Ctrl+E)' no topo do Teams
+                    [System.Windows.Forms.SendKeys]::SendWait("^e")
+                    Start-Sleep -Milliseconds 700
+
+                    # 5. Limpar qualquer busca anterior na barra com Backspace seguro
                     [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}{BACKSPACE}{BACKSPACE}{BACKSPACE}{BACKSPACE}")
                     Start-Sleep -Milliseconds 150
 
-                    # 5. Digitar a matricula caractere por caractere diretamente dentro do campo Para
+                    # 6. Digitar a matricula caractere por caractere diretamente na pesquisa
                     $destLimpo = $c.Destinatario.Trim()
-                    Log-Msg "  Digitando destinatario '$destLimpo' no campo Para..."
+                    Log-Msg "  Pesquisando destinatario '$destLimpo' via Pesquisa (Ctrl+E)..."
                     [System.Windows.Forms.SendKeys]::SendWait($destLimpo)
                     Start-Sleep -Milliseconds 400
 
                     # Toque de espaco e backspace para disparar o autocomplete do Active Directory / Entra ID do Santander
                     [System.Windows.Forms.SendKeys]::SendWait(" {BACKSPACE}")
 
-                    # 6. Aguardar o Teams buscar e sugerir o colaborador no dropdown do Santander
-                    Start-Sleep -Milliseconds 3000
+                    # 7. Aguardar o Teams buscar e sugerir o colaborador no dropdown do Santander
+                    Start-Sleep -Milliseconds 2800
 
-                    # 7. Selecionar o colaborador sugerido no dropdown
-                    # Seta para baixo destaca a 1a sugestao corporativa e Enter confirma a inclusao do contato
+                    # 8. Selecionar o colaborador sugerido na pesquisa e abrir o chat direto
+                    # Seta para baixo vai para o primeiro resultado de Pessoas e Enter abre a conversa direta
                     [System.Windows.Forms.SendKeys]::SendWait("{DOWN}")
                     Start-Sleep -Milliseconds 300
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-                    Start-Sleep -Milliseconds 800
-                    # Segundo Enter para confirmar a criacao do chat com aquele colaborador
-                    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-                    Start-Sleep -Milliseconds 500
+                    Start-Sleep -Milliseconds 1500
 
-                    # 8. Focar na caixa de mensagem no rodape da janela
-                    [TeamsHelper]::ClicarNoCampoMensagem()
+                    # 9. Focar na caixa de mensagem no rodape da janela
+                    # Atalho oficial do Teams para ir direto para a caixa de texto: Ctrl + R
+                    [System.Windows.Forms.SendKeys]::SendWait("^r")
                     Start-Sleep -Milliseconds 300
-                    [System.Windows.Forms.SendKeys]::SendWait("%+c")
-                    Start-Sleep -Milliseconds 200
+                    try {
+                        [TeamsHelper]::ClicarNoCampoMensagem()
+                        Start-Sleep -Milliseconds 300
+                    } catch { }
 
-                    # 9. Limpar o campo de mensagem e colar o texto personalizado atualizado
+                    # 10. Limpar qualquer caractere residual e colar a mensagem personalizada atualizada
                     [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
                     Start-Sleep -Milliseconds 100
                     [System.Windows.Forms.Clipboard]::SetText($c.Mensagem)
@@ -1265,7 +1253,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                     [System.Windows.Forms.SendKeys]::SendWait("^v")
                     Start-Sleep -Milliseconds 800
 
-                    # 10. DISPARAR O ENVIO DA MENSAGEM NO TEAMS
+                    # 11. DISPARAR O ENVIO DA MENSAGEM NO TEAMS
                     # Enviamos Ctrl+Enter (atalho universal de envio da Microsoft), Enter e clique fisico no botao Enviar
                     [System.Windows.Forms.SendKeys]::SendWait("^{ENTER}")
                     Start-Sleep -Milliseconds 300
