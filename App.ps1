@@ -70,19 +70,12 @@ public class TeamsHelper {
         AtivarEMaximizar(hwnd);
     }
 
-    public static void ClicarNoCampoPara() {
-        IntPtr hwnd = GetForegroundWindow();
+    public static void ClicarNaMoldura(IntPtr hwnd) {
         RECT rect;
         if (GetWindowRect(hwnd, out rect)) {
-            int w = rect.Right - rect.Left;
-            // No Teams maximizado, o campo "Para:" fica logo apos a lista de chats (~380px) e a ~85px do topo
-            int targetX;
-            if (w > 800) {
-                targetX = rect.Left + 470;
-            } else {
-                targetX = rect.Left + (int)(w * 0.45);
-            }
-            int targetY = rect.Top + 85;
+            // Clica na barra superior neutra (fora de botoes e links) para transferir o foco ativo do Windows para a janela
+            int targetX = rect.Left + 250;
+            int targetY = rect.Top + 20;
             SetCursorPos(targetX, targetY);
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
             mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
@@ -97,6 +90,19 @@ public class TeamsHelper {
             int h = rect.Bottom - rect.Top;
             // O campo "Digite uma mensagem" fica centralizado no painel de chat e a ~45px do fundo da janela
             int targetX = rect.Left + (int)(w * 0.65);
+            int targetY = rect.Bottom - 45;
+            SetCursorPos(targetX, targetY);
+            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
+            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
+        }
+    }
+
+    public static void ClicarNoBotaoEnviar() {
+        IntPtr hwnd = GetForegroundWindow();
+        RECT rect;
+        if (GetWindowRect(hwnd, out rect)) {
+            // O botao Enviar (icone de aviao/seta) fica no canto inferior direito da caixa de chat
+            int targetX = rect.Right - 38;
             int targetY = rect.Bottom - 45;
             SetCursorPos(targetX, targetY);
             mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
@@ -1200,7 +1206,9 @@ function Executar-Envio($somentePrimeiro = $false) {
                         $procTeams = Get-Process -Name "ms-teams", "Teams" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1
                         if ($procTeams) {
                             [TeamsHelper]::AtivarEMaximizar($procTeams.MainWindowHandle)
-                            Start-Sleep -Milliseconds 400
+                            Start-Sleep -Milliseconds 300
+                            [TeamsHelper]::ClicarNaMoldura($procTeams.MainWindowHandle)
+                            Start-Sleep -Milliseconds 300
                         }
                         $wshell = New-Object -ComObject WScript.Shell
                         $wshell.AppActivate("Teams") | Out-Null
@@ -1210,65 +1218,63 @@ function Executar-Envio($somentePrimeiro = $false) {
                     }
                     catch { }
 
-                    # 3. Iniciar nova conversa limpa (Ctrl+N)
+                    # 3. Fechar menus anteriores e iniciar NOVA CONVERSA LIMPA (Ctrl+N)
+                    # No Teams, o atalho Ctrl+N abre o chat novo e posiciona o cursor DIRETAMENTE dentro do campo "Para:"
+                    [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
+                    Start-Sleep -Milliseconds 250
                     [System.Windows.Forms.SendKeys]::SendWait("^n")
-                    Start-Sleep -Milliseconds 800
+                    Start-Sleep -Milliseconds 1200
 
-                    # 4. Clique fisico assistido exatamente no campo 'Para:' para garantir o cursor ativo
-                    try {
-                        [TeamsHelper]::ClicarNoCampoPara()
-                        Start-Sleep -Milliseconds 300
-                    } catch { }
-
-                    # 5. Limpar qualquer caractere residual do campo Para
-                    [System.Windows.Forms.SendKeys]::SendWait("^a{BACKSPACE}")
+                    # 4. Limpar qualquer caractere residual com Backspace seguro (NUNCA Ctrl+A para nao selecionar a tela inteira)
+                    [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}{BACKSPACE}{BACKSPACE}{BACKSPACE}{BACKSPACE}")
                     Start-Sleep -Milliseconds 150
 
-                    # 6. Digitar o destinatario (matricula ou email)
+                    # 5. Digitar a matricula caractere por caractere diretamente dentro do campo Para
                     $destLimpo = $c.Destinatario.Trim()
                     Log-Msg "  Digitando destinatario '$destLimpo' no campo Para..."
-                    [System.Windows.Forms.Clipboard]::SetText($destLimpo)
-                    Start-Sleep -Milliseconds 100
-                    [System.Windows.Forms.SendKeys]::SendWait("^v")
-                    Start-Sleep -Milliseconds 200
+                    [System.Windows.Forms.SendKeys]::SendWait($destLimpo)
+                    Start-Sleep -Milliseconds 400
 
-                    # Pequeno toque para acionar o autocomplete do Active Directory / Entra ID do Santander
+                    # Toque de espaco e backspace para disparar o autocomplete do Active Directory / Entra ID do Santander
                     [System.Windows.Forms.SendKeys]::SendWait(" {BACKSPACE}")
 
-                    # 7. Aguardar o Teams buscar e sugerir o contato no dropdown
-                    Start-Sleep -Milliseconds 2500
+                    # 6. Aguardar o Teams buscar e sugerir o colaborador no dropdown do Santander
+                    Start-Sleep -Milliseconds 3000
 
-                    # 8. Selecionar o PRIMEIRO contato sugerido na lista
-                    # Seta para baixo destaca o primeiro resultado da busca corporativa e Enter confirma
+                    # 7. Selecionar o colaborador sugerido no dropdown
+                    # Seta para baixo destaca a 1a sugestao corporativa e Enter confirma a inclusao do contato
                     [System.Windows.Forms.SendKeys]::SendWait("{DOWN}")
                     Start-Sleep -Milliseconds 300
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
                     Start-Sleep -Milliseconds 800
+                    # Segundo Enter para confirmar a criacao do chat com aquele colaborador
+                    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+                    Start-Sleep -Milliseconds 500
 
-                    # 9. Garantir foco no campo "Digite uma mensagem"
-                    # Atalho oficial da Microsoft Teams para caixa de mensagem: Alt + Shift + C
+                    # 8. Focar na caixa de mensagem no rodape da janela
+                    [TeamsHelper]::ClicarNoCampoMensagem()
+                    Start-Sleep -Milliseconds 300
                     [System.Windows.Forms.SendKeys]::SendWait("%+c")
                     Start-Sleep -Milliseconds 200
 
-                    # Clique fisico automatizado no campo "Digite uma mensagem" no rodape da janela
-                    try {
-                        [TeamsHelper]::ClicarNoCampoMensagem()
-                        Start-Sleep -Milliseconds 300
-                    } catch { }
-
-                    # 10. Limpar qualquer caractere residual do campo de mensagem
-                    [System.Windows.Forms.SendKeys]::SendWait("^a{BACKSPACE}")
-                    Start-Sleep -Milliseconds 150
-
-                    # 11. Copiar e colar a mensagem personalizada atualizada
-                    [System.Windows.Forms.Clipboard]::SetText($c.Mensagem)
+                    # 9. Limpar o campo de mensagem e colar o texto personalizado atualizado
+                    [System.Windows.Forms.SendKeys]::SendWait("{BACKSPACE}")
                     Start-Sleep -Milliseconds 100
+                    [System.Windows.Forms.Clipboard]::SetText($c.Mensagem)
+                    Start-Sleep -Milliseconds 150
                     [System.Windows.Forms.SendKeys]::SendWait("^v")
-                    Start-Sleep -Milliseconds 600
-
-                    # 12. Enviar a mensagem com ENTER
-                    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
                     Start-Sleep -Milliseconds 800
+
+                    # 10. DISPARAR O ENVIO DA MENSAGEM NO TEAMS
+                    # Enviamos Ctrl+Enter (atalho universal de envio da Microsoft), Enter e clique fisico no botao Enviar
+                    [System.Windows.Forms.SendKeys]::SendWait("^{ENTER}")
+                    Start-Sleep -Milliseconds 300
+                    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+                    Start-Sleep -Milliseconds 300
+                    try {
+                        [TeamsHelper]::ClicarNoBotaoEnviar()
+                        Start-Sleep -Milliseconds 500
+                    } catch { }
 
                     # Validacao com operador SOMENTE se a opcao estiver explicitamente marcada na tela
                     if ($pedirConfirmacao) {
