@@ -35,12 +35,6 @@ public class TeamsHelper {
     public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     [DllImport("user32.dll")]
-    public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, int dwExtraInfo);
-
-    [DllImport("user32.dll")]
-    public static extern bool SetCursorPos(int X, int Y);
-
-    [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hWnd);
 
     [DllImport("user32.dll")]
@@ -49,8 +43,6 @@ public class TeamsHelper {
     [DllImport("user32.dll")]
     public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
 
-    public const uint MOUSEEVENTF_LEFTDOWN = 0x02;
-    public const uint MOUSEEVENTF_LEFTUP = 0x04;
     public const int SW_MAXIMIZE = 3;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -102,60 +94,6 @@ public class TeamsHelper {
 
     public static void FocarJanela(IntPtr hwnd) {
         AtivarEMaximizar(hwnd);
-    }
-
-    public static void ClicarNaBarraPesquisa() {
-        IntPtr hwnd = ObterJanelaTeams();
-        if (hwnd == IntPtr.Zero) {
-            hwnd = GetForegroundWindow();
-        }
-        RECT rect;
-        if (GetWindowRect(hwnd, out rect)) {
-            int w = rect.Right - rect.Left;
-            // A barra "Pesquisar (Ctrl+E)" fica centralizada no topo e a ~24px abaixo da borda superior
-            int targetX = rect.Left + (w / 2);
-            int targetY = rect.Top + 24;
-            SetCursorPos(targetX, targetY);
-            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        }
-    }
-
-    public static void ClicarNoCampoMensagem() {
-        IntPtr hwnd = ObterJanelaTeams();
-        if (hwnd == IntPtr.Zero) {
-            hwnd = GetForegroundWindow();
-        }
-        RECT rect;
-        if (GetWindowRect(hwnd, out rect)) {
-            int w = rect.Right - rect.Left;
-            int h = rect.Bottom - rect.Top;
-            // O campo "Digite uma mensagem" fica no painel de chat e a ~105px do fundo da janela (centro da caixa retangular)
-            int targetX = (w > 800) ? (rect.Left + 360 + (int)((w - 360) * 0.45)) : (rect.Left + (int)(w * 0.60));
-            int targetY = rect.Bottom - 105;
-            SetCursorPos(targetX, targetY);
-            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-            System.Threading.Thread.Sleep(50);
-            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        }
-    }
-
-    public static void ClicarNoBotaoEnviar() {
-        IntPtr hwnd = ObterJanelaTeams();
-        if (hwnd == IntPtr.Zero) {
-            hwnd = GetForegroundWindow();
-        }
-        RECT rect;
-        if (GetWindowRect(hwnd, out rect)) {
-            // O botao Enviar (icone de aviao/seta) fica no canto inferior direito da caixa de chat
-            int targetX = rect.Right - 45;
-            int targetY = rect.Bottom - 65;
-            SetCursorPos(targetX, targetY);
-            mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0);
-            mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0);
-        }
     }
 }
 "@
@@ -1355,16 +1293,12 @@ function Executar-Envio($somentePrimeiro = $false) {
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
                     Start-Sleep -Milliseconds 2500 # Aguarda o Teams carregar o chat com o colaborador
 
-                    # 9. Focar na caixa de mensagem 'Digite uma mensagem'
-                    # Pressiona ESC para fechar qualquer menu suspenso ou tooltip
-                    [System.Windows.Forms.SendKeys]::SendWait("{ESC}")
-                    Start-Sleep -Milliseconds 200
-
-                    # Clique fisico duplo assistido calibrado exatamente dentro da caixa 'Digite uma mensagem' (105px acima do rodape)
-                    try {
-                        [TeamsHelper]::ClicarNoCampoMensagem()
-                        Start-Sleep -Milliseconds 400
-                    } catch { }
+                    # 9. Ir do destinatario para a caixa de mensagem 'Digite uma mensagem' via teclado nativo
+                    # No Teams, ao confirmar o destinatario na busca, pressionar ENTER e TAB pula diretamente para o campo de texto (sem uso de mouse/pixels, compativel com 2 telas)
+                    [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+                    Start-Sleep -Milliseconds 250
+                    [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
+                    Start-Sleep -Milliseconds 300
 
                     # 10. Copiar e colar a mensagem personalizada atualizada
                     Log-Msg "  Colando mensagem personalizada na caixa de texto..."
@@ -1373,27 +1307,23 @@ function Executar-Envio($somentePrimeiro = $false) {
                     [System.Windows.Forms.SendKeys]::SendWait("^v")
                     Start-Sleep -Milliseconds 600
 
-                    # 11. DISPARAR O ENVIO DA MENSAGEM NO TEAMS
-                    # Enviamos Ctrl+Enter, Enter e clique assistido no botao Enviar
-                    Log-Msg "  Disparando envio (Ctrl+Enter, Enter e Botao Enviar)..."
+                    # 11. DISPARAR O ENVIO DA MENSAGEM NO TEAMS VIA TECLADO NATIVO
+                    # No Teams, Ctrl+Enter e Enter enviam a mensagem (sem depender de pixels do botao)
+                    Log-Msg "  Disparando envio (Ctrl+Enter e Enter)..."
                     [System.Windows.Forms.SendKeys]::SendWait("^{ENTER}")
-                    Start-Sleep -Milliseconds 250
+                    Start-Sleep -Milliseconds 300
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
-                    Start-Sleep -Milliseconds 250
-                    try {
-                        [TeamsHelper]::ClicarNoBotaoEnviar()
-                        Start-Sleep -Milliseconds 400
-                    } catch { }
+                    Start-Sleep -Milliseconds 400
 
                     # Validacao de seguranca contra falsos positivos:
                     # No modo 'Testar Apenas o 1o Contato' ou quando a opcao estiver marcada na tela,
-                    # o operador confirma visualmente no Teams antes de alterar a planilha Excel!
+                    # o operador confirma visualmente se a mensagem realmente apareceu no Teams!
                     $exigirConfirmacao = $somentePrimeiro -or $pedirConfirmacao
                     if ($exigirConfirmacao) {
                         $respostaOperador = [System.Windows.MessageBox]::Show(
                             "A mensagem foi REALMENTE enviada no Teams para $($c.Nome) ($($c.Destinatario))?`n`n" +
-                            "Clique em 'SIM' para confirmar a gravacao no Excel.`n" +
-                            "Clique em 'NAO' se a mensagem nao apareceu/nao foi enviada (mantem o Excel INTACTO).",
+                            "Clique em 'SIM' se a mensagem apareceu e foi enviada (atualiza a planilha Excel).`n" +
+                            "Clique em 'NAO' para APONTAR ERRO no relatorio (mantem a planilha Excel 100% INTACTA).",
                             "Validacao de Envio - Seguranca Excel",
                             [System.Windows.MessageBoxButton]::YesNo,
                             [System.Windows.MessageBoxImage]::Question
@@ -1403,7 +1333,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                         }
                         else {
                             $sucessoItem = $false
-                            Log-Msg "  [FALHA] Envio nao confirmado pelo operador no Teams. Planilha Excel NAO foi alterada."
+                            Log-Msg "  [ERRO APONTADO] Envio nao confirmado no Teams para $($c.Nome). Planilha Excel PRESERVADA sem alteracao."
                         }
                     }
                     else {
