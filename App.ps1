@@ -1293,11 +1293,13 @@ function Executar-Envio($somentePrimeiro = $false) {
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
                     Start-Sleep -Milliseconds 2500 # Aguarda o Teams carregar o chat com o colaborador
 
-                    # 9. Ir do destinatario para a caixa de mensagem 'Digite uma mensagem' via teclado nativo
-                    # No Teams, ao confirmar o destinatario na busca, pressionar ENTER e TAB pula diretamente para o campo de texto (sem uso de mouse/pixels, compativel com 2 telas)
+                    # 9. Ir do destinatario para a caixa de mensagem 'Digite uma mensagem'
+                    # Navegacao nativa por teclado: ENTER, TAB e Ctrl + R para garantir o foco no campo de texto (sem mouse/pixels)
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
                     Start-Sleep -Milliseconds 250
                     [System.Windows.Forms.SendKeys]::SendWait("{TAB}")
+                    Start-Sleep -Milliseconds 250
+                    [System.Windows.Forms.SendKeys]::SendWait("^r")
                     Start-Sleep -Milliseconds 300
 
                     # 10. Copiar e colar a mensagem personalizada atualizada
@@ -1308,23 +1310,24 @@ function Executar-Envio($somentePrimeiro = $false) {
                     Start-Sleep -Milliseconds 600
 
                     # 11. DISPARAR O ENVIO DA MENSAGEM NO TEAMS VIA TECLADO NATIVO
-                    # No Teams, Ctrl+Enter e Enter enviam a mensagem (sem depender de pixels do botao)
+                    # No Teams, Ctrl+Enter e Enter enviam a mensagem digitada
                     Log-Msg "  Disparando envio (Ctrl+Enter e Enter)..."
                     [System.Windows.Forms.SendKeys]::SendWait("^{ENTER}")
                     Start-Sleep -Milliseconds 300
                     [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
                     Start-Sleep -Milliseconds 400
 
-                    # Validacao de seguranca contra falsos positivos:
-                    # No modo 'Testar Apenas o 1o Contato' ou quando a opcao estiver marcada na tela,
-                    # o operador confirma visualmente se a mensagem realmente apareceu no Teams!
+                    # Validacao de seguranca do relatorio:
+                    # No modo 'Testar Apenas o 1o Contato' ou quando a opcao de confirmacao estiver marcada,
+                    # o operador confirma se a mensagem realmente saiu no chat para o relatorio nunca marcar
+                    # sucesso falso se a mensagem nao foi enviada!
                     $exigirConfirmacao = $somentePrimeiro -or $pedirConfirmacao
                     if ($exigirConfirmacao) {
                         $respostaOperador = [System.Windows.MessageBox]::Show(
                             "A mensagem foi REALMENTE enviada no Teams para $($c.Nome) ($($c.Destinatario))?`n`n" +
-                            "Clique em 'SIM' se a mensagem apareceu e foi enviada (atualiza a planilha Excel).`n" +
-                            "Clique em 'NAO' para APONTAR ERRO no relatorio (mantem a planilha Excel 100% INTACTA).",
-                            "Validacao de Envio - Seguranca Excel",
+                            "Clique em 'SIM' se a mensagem apareceu e foi enviada (registra SUCESSO e atualiza o Excel).`n" +
+                            "Clique em 'NAO' se a mensagem NAO foi enviada (aponta ERRO no relatorio e mantem o Excel INTACTO).",
+                            "Validacao de Envio - Seguranca do Relatorio",
                             [System.Windows.MessageBoxButton]::YesNo,
                             [System.Windows.MessageBoxImage]::Question
                          )
@@ -1333,7 +1336,7 @@ function Executar-Envio($somentePrimeiro = $false) {
                         }
                         else {
                             $sucessoItem = $false
-                            Log-Msg "  [ERRO APONTADO] Envio nao confirmado no Teams para $($c.Nome). Planilha Excel PRESERVADA sem alteracao."
+                            Log-Msg "  [ERRO APONTADO] Mensagem NAO foi enviada no Teams para $($c.Nome). Planilha Excel PRESERVADA sem alteracao."
                         }
                     }
                     else {
